@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <fstream> // ifstream
 #include <sstream> // stringstream
+#include <limits.h>
 
 namespace fs = std::filesystem;
 
@@ -27,6 +28,7 @@ using Viewer = igl::opengl::glfw::Viewer;
 
 std::vector<string> paths;
 std::vector<Eigen::MatrixXd> ddata;
+std::vector<Eigen::MatrixXd> dcolors;
 Eigen::MatrixXd V, N;
 Eigen::MatrixXi F;
 
@@ -37,6 +39,8 @@ Viewer viewer;
 typedef std::vector<std::vector<unsigned short int>> DepthData;
 
 std::vector<DepthData> all_depths;
+
+string folder;
 
 //bools
 bool animate = true; //Animate or pause the animation
@@ -56,7 +60,8 @@ bool callback_key_down(Viewer& viewer, unsigned char key, int modifiers);
 
 void render_frame() {
   viewer.data().clear();
-  viewer.data().add_points(ddata[l], Eigen::RowVector3d(0, 0, 0));
+  viewer.data().set_points(ddata[l], dcolors[l]);
+  //viewer.data().add_points(ddata[l], Eigen::RowVector3d(0, 0, 0));
 }
 
 //Compute what to display on the next frame
@@ -93,7 +98,7 @@ bool string_contains(string s, char c) {
 }
 
 void visualize_pcds() {
-  for (const auto & entry : fs::directory_iterator("../data/ahat")) {
+  for (const auto & entry : fs::directory_iterator(folder)) {
     paths.push_back(entry.path());
   }
   std::sort(paths.begin(), paths.end());
@@ -148,7 +153,7 @@ DepthData read_pgm(string pgm_file_path) {
 }
 
 void read_extrinsics(Eigen::MatrixXf& Ext) {
-  ifstream infile("../data/raw_ahat/Depth AHaT_extrinsics.txt");
+  ifstream infile(folder+"Depth AHaT_extrinsics.txt");
   string inputLine = "";
   Ext.resize(4, 4);
   int j = 0, i = 0;
@@ -163,33 +168,8 @@ void read_extrinsics(Eigen::MatrixXf& Ext) {
   }
 }
 
-void read_rig2world(vector<Eigen::MatrixXf>& rig2world_vec, vector<string>& timestamps) {
-  ifstream infile("../data/raw_ahat/Depth AHaT_rig2world.txt");
-  string inputLine = "";
-  for(int k = 0; k < nb_frames; k++) {
-    Eigen::MatrixXf M(4, 4);
-    int j = 0, i = 0;
-    getline(infile, inputLine);
-    stringstream line(inputLine);
-    string timestamp;
-    string next_val;
-    getline(line, timestamp, ',');
-    timestamps.push_back(timestamp);
-    while(getline(line, next_val, ',')){
-      float f = std::stof(next_val);
-      M(j, i) = f;
-      i++;
-      if(i == 4) {
-        i = 0;
-        j++;
-      }
-    }
-    rig2world_vec.push_back(M);
-  }
-}
-
 void read_lut(Eigen::MatrixXf& mat) {
-  ifstream infile("../data/raw_ahat/Depth AHaT_lut.bin", ios::binary);
+  ifstream infile(folder+"Depth AHaT_lut.bin", ios::binary);
   float f;
   int y = 0;
   int x = 0;
@@ -206,7 +186,6 @@ void read_lut(Eigen::MatrixXf& mat) {
 
 void depth_map_to_pc_px(Eigen::MatrixXf& D, const DepthData& depth_map, 
   const Eigen::MatrixXf& cam_calibration, float clamp_min = 0, float clamp_max = 1) {
-  cout << cam_calibration.rows() << " " << cam_calibration.cols() << endl;
   clamp_min *= 1000;
   clamp_max *= 1000;
 
@@ -247,7 +226,6 @@ void depth_map_to_pc_px(Eigen::MatrixXf& D, const DepthData& depth_map,
 }
 
 void apply_transformation(const Eigen::MatrixXf& T, const Eigen::MatrixXf& points, Eigen::MatrixXf& out, int out_dim) {
-  cout << points.rows() << " " << points.cols() << endl;
   MatrixXf P = points;
   P.conservativeResize(points.rows(), points.cols()+1);
   P.col(P.cols()-1) = ones.head(points.rows());
@@ -258,8 +236,146 @@ void apply_transformation(const Eigen::MatrixXf& T, const Eigen::MatrixXf& point
     out = temp;
 }
 
+void read_rig2world(vector<Eigen::MatrixXf>& rig2world_vec, vector<long>& timestamps) {
+  ifstream infile(folder+"Depth AHaT_rig2world.txt");
+  string input_line = "";
+  for(int k = 0; k < nb_frames; k++) {
+    Eigen::MatrixXf M(4, 4);
+    int j = 0, i = 0;
+    getline(infile, input_line);
+    stringstream line(input_line);
+    string timestamp;
+    string next_val;
+    getline(line, timestamp, ',');
+    timestamps.push_back(stol(timestamp));
+    while(getline(line, next_val, ',')){
+      float f = std::stof(next_val);
+      M(j, i) = f;
+      i++;
+      if(i == 4) {
+        i = 0;
+        j++;
+      }
+    }
+    rig2world_vec.push_back(M);
+  }
+}
+
+void read_pv_meta(vector<Eigen::MatrixXf>& pv2world_matrices, vector<long>& timestamps, 
+  vector<std::pair<float, float>>& focals, float& intrinsics_ox, float& intrinsics_oy,
+  int& intrinsics_width, int& intrinsics_height) {
+  ifstream infile(folder+"2022-10-26-120549_pv.txt");
+  string input_line = "";
+
+  getline(infile, input_line, ',');
+  intrinsics_ox = stof(input_line);
+  getline(infile, input_line, ',');
+  intrinsics_oy = stof(input_line);
+  getline(infile, input_line, ',');
+  intrinsics_width = stof(input_line);
+  getline(infile, input_line);
+  intrinsics_height = stof(input_line);
+
+  while(true) {
+    if(!getline(infile, input_line)) break;
+    Eigen::MatrixXf M(4, 4);
+    
+    stringstream line(input_line);
+    string next_val;
+    getline(line, next_val, ',');
+    timestamps.push_back(stol(next_val));
+    getline(line, next_val, ',');
+    int focalx = stof(next_val);
+    getline(line, next_val, ',');
+    int focaly = stof(next_val);
+
+    focals.push_back(std::pair<float, float>(focalx, focaly));
+
+    for(int j = 0; j < 4; j++) {
+      for(int i = 0; i < 4; i++) {
+        getline(line, next_val, ',');
+        M(j, i) = std::stof(next_val);
+      }
+    }
+    pv2world_matrices.push_back(M);
+  }
+}
+
+int closest_timestamp_idx(long ts, vector<long> timestamps) {
+  //TODO do binary search
+  long shortest_time = LONG_MAX;
+  int index = 0;
+  int i = 0;
+  for(long l : timestamps) {
+    long dt = abs(l - ts);
+    if(dt < shortest_time) {
+      shortest_time = dt;
+      index = i;
+    }
+    i++;
+  }
+  return index;
+}
+
+void read_rgb(long pv_timestamp, int width, int height, vector<vector<RowVector3d>>& colors) {
+  string file_path = folder+"PV/"+to_string(pv_timestamp)+".bytes";
+  ifstream infile(file_path, ios::binary);
+  unsigned int val;
+  int y = 0;
+  int x = 0;
+  Eigen::MatrixXf RGB;
+  colors = vector<vector<RowVector3d>>(height, vector<RowVector3d>(width));
+  RGB.resize(height, width);
+  for(int y = 0; y < height; y++) {
+    for(int x = 0; x < width; x++) {
+      infile.read(reinterpret_cast<char*>(&val), sizeof(unsigned int));
+      int r = (val & 0x00FF0000) >> 16;
+      int g = (val & 0x0000FF00) >> 8;
+      int b = (val & 0x000000FF);
+      colors[y][x] = RowVector3d(r, g, b) / 255.0;
+    }
+  }
+}
+
+Eigen::MatrixXf to_homogeneous(const Eigen::MatrixXf& points) {
+  MatrixXf P = points;
+  P.conservativeResize(points.rows(), points.cols()+1);
+  P.col(P.cols()-1) = ones.head(points.rows());
+  return P;
+}
+
+void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv2world, 
+  float focalx, float focaly, float principalx, float principaly, int pvWidth, int pvHeight,
+  const vector<vector<RowVector3d>>& rgbImage, Eigen::MatrixXd& colors) {
+
+  Eigen::MatrixXf Intrinsic(3, 3);
+  Intrinsic << focalx, 0, principalx, 0, focaly, principaly, 0, 0, 1;
+
+  Eigen::MatrixXf pointsWorld_h = to_homogeneous(pointsWorld);
+
+  Eigen::MatrixXf world2pv = pv2world.inverse();
+  Eigen::MatrixXf pointsPV = (world2pv * pointsWorld_h.transpose()).transpose().block(0, 0, pointsWorld_h.rows(), 3);
+  
+  Eigen::MatrixXf pointsPixel_h = (Intrinsic * pointsPV.transpose()).transpose(); //Retrieve homogeneous coordinates in pixel space
+  //TODO this assumes we have homogeneous coordinates in pointsPixel_h (points x 3), (x, y, w) format:
+  colors.resize(pointsPixel_h.rows(), 3);
+  for(int i = 0; i < pointsPixel_h.rows(); i++) {
+    float x_h = pointsPixel_h(i, 0); //TODO is this the right ordering?
+    float y_h = pointsPixel_h(i, 1);
+    float w = pointsPixel_h(i, 2);
+    int x = (int)(x_h / w);
+    int y = (int)(y_h / w);
+    if (x >= 0 && x < pvWidth && y >= 0 && y < pvHeight) {
+      colors.row(i) = rgbImage[y][pvWidth - x];
+    } else {
+      colors.row(i) = RowVector3d(0, 0, 0); //No color
+      //TODO may want to mark these points as useless, i.e. discard them
+    }
+  }
+}
+
 void visualize_raw_data() {
-  for (const auto & entry : fs::directory_iterator("../data/raw_ahat/pgm")) {
+  for (const auto & entry : fs::directory_iterator(folder+"Depth AHaT")) {
     string path = entry.path();
     if(path[path.length()-7] == '_')
       continue;
@@ -274,32 +390,69 @@ void visualize_raw_data() {
   cout << cam2rig << endl;
 
   vector<Eigen::MatrixXf> rig2world_matrices;
-  vector<string> timestamps;
+  vector<long> timestamps;
   read_rig2world(rig2world_matrices, timestamps);
 
   Eigen::MatrixXf lut;
   read_lut(lut);
 
+  vector<Eigen::MatrixXf> pv2world_matrices;
+  vector<long> pv_timestamps;
+  vector<std::pair<float, float>> focals;
+  float intrinsics_ox, intrinsics_oy;
+  int intrinsics_width, intrinsics_height;
+  read_pv_meta(pv2world_matrices, pv_timestamps, focals, intrinsics_ox, intrinsics_oy, 
+    intrinsics_width, intrinsics_height);
+
   Eigen::MatrixXf D;
-  Eigen::MatrixXf transformed;
+  Eigen::MatrixXf pointsRig;
+  Eigen::MatrixXf pointsWorld;
   Eigen::MatrixXd V;
+  Eigen::MatrixXd colors;
 
   int kk = 0;
   for (auto path : paths) {
+    cout << "path " << kk << endl;
+    long depth_timestamp = timestamps[kk];
+    int pv_timestamp_idx = closest_timestamp_idx(depth_timestamp, pv_timestamps);
+    long pv_timestamp = pv_timestamps[pv_timestamp_idx];
+
     DepthData data = read_pgm(path); //TODO change path
     all_depths.push_back(data);
 
-    depth_map_to_pc_px(D, data, lut, 0.2, 1);
+    depth_map_to_pc_px(D, data, lut, 0, 1);
 
-    apply_transformation(cam2rig, D, transformed, 3); //TODO change index here
-    V = transformed.cast<double>();
+    //Read RGB Image
+    vector<vector<RowVector3d>> rgbImage;
+    read_rgb(pv_timestamp, intrinsics_width, intrinsics_height, rgbImage);
+
+    //Transform points from cam coordinatse to rig coordinates
+    apply_transformation(cam2rig, D, pointsRig, 3);
+
+    //Transform points from rig coordinates to world
+    // cout << "pointsRig: " << pointsRig.rows() << " " << pointsRig.cols() << endl;
+    // cout << "rig2world_matrices[kk]: " << rig2world_matrices[kk].rows() << " " << rig2world_matrices[kk].cols() << endl;
+    apply_transformation(rig2world_matrices[kk], pointsRig, pointsWorld, 3);
+
+    //Project points from world coordinates to RGB
+    //cout << "pointsWorld: " << pointsWorld.rows() << " " << pointsWorld.cols() << endl;
+    //cout << focals[kk].first << " " << focals[kk].second << " " << intrinsics_ox << " " << intrinsics_oy << endl; 
+    project_on_pv(pointsWorld, pv2world_matrices[pv_timestamp_idx], 
+      focals[kk].first, focals[kk].second, intrinsics_ox, intrinsics_oy, 
+      intrinsics_width, intrinsics_height, rgbImage, colors);
+    dcolors.push_back(colors);
+
+    //Cast to double so that libigl is happy
+    V = pointsRig.cast<double>();
     ddata.push_back(V);
     kk++;
-    // if(kk == 40)
-    //   break;
-  }
 
-  //nb_frames = 40;
+    //Debugging
+     if(kk == 20)
+       break;
+  }
+  //Debugging
+  nb_frames = 20;
 
   viewer.data().clear();
   viewer.data().add_points(V, Eigen::RowVector3d(0, 0, 0));
@@ -307,6 +460,9 @@ void visualize_raw_data() {
 }
 
 int main(int argc, char *argv[]) {
+
+  //folder = "../data/raw_ahat/";
+  folder = "../data/umbrella/";
 
   ones.resize(512 * 512);
   for(int i = 0; i < 512 * 512; i++) {
@@ -328,5 +484,6 @@ int main(int argc, char *argv[]) {
 
   viewer.core().set_rotation_type(igl::opengl::ViewerCore::ROTATION_TYPE_TRACKBALL);
   viewer.data().point_size = 1;
+  //viewer.core().background_color.setOnes();
   viewer.launch();
 }
