@@ -29,8 +29,11 @@ using Viewer = igl::opengl::glfw::Viewer;
 std::vector<string> paths;
 std::vector<Eigen::MatrixXd> ddata;
 std::vector<Eigen::MatrixXd> dcolors;
+std::vector<Eigen::MatrixXd> djointsleft;
+std::vector<Eigen::MatrixXd> djointsright;
 Eigen::MatrixXd V, N;
 Eigen::MatrixXi F;
+Eigen::MatrixXi E;
 
 Eigen::VectorXf ones;
 
@@ -61,6 +64,9 @@ bool callback_key_down(Viewer& viewer, unsigned char key, int modifiers);
 void render_frame() {
   viewer.data().clear();
   viewer.data().set_points(ddata[l], dcolors[l]);
+  //TODO calling set_edges twices overrides the first one
+  viewer.data().set_edges(djointsleft[l], E, Eigen::RowVector3d(0, 0, 1));
+  viewer.data().set_edges(djointsright[l], E, Eigen::RowVector3d(1, 0, 0));
   //viewer.data().add_points(ddata[l], Eigen::RowVector3d(0, 0, 0));
 }
 
@@ -459,6 +465,30 @@ void read_human_data(vector<long>& timestamps, vector<vector<MatrixXf>>& list_jo
   }
 }
 
+void compute_joints_positions(Eigen::MatrixXf& rig2world_matrix,
+    vector<MatrixXf>& joints_left, vector<MatrixXf>& joints_right) {
+
+  Eigen::MatrixXf world2rig = rig2world_matrix.inverse();
+
+  Eigen::MatrixXd JointsLeft(26, 3);
+  int i = 0;
+  for(MatrixXf Joint : joints_left) {
+    RowVector3f joint_point = (world2rig * Joint).block(0, 3, 3, 1).transpose();
+    JointsLeft.row(i) = RowVector3d(joint_point(0), joint_point(1), joint_point(2));
+    i++;
+  }
+  djointsleft.push_back(JointsLeft);
+
+  Eigen::MatrixXd JointsRight(26, 3);
+  i = 0;
+  for(MatrixXf Joint : joints_right) {
+    RowVector3f joint_point = (world2rig * Joint).block(0, 3, 3, 1).transpose();
+    JointsRight.row(i) = RowVector3d(joint_point(0), joint_point(1), joint_point(2));
+    i++;
+  }
+  djointsright.push_back(JointsRight);
+}
+
 void visualize_raw_data() {
   for (const auto & entry : fs::directory_iterator(folder+"Depth AHaT")) {
     string path = entry.path();
@@ -489,6 +519,16 @@ void visualize_raw_data() {
   read_pv_meta(pv2world_matrices, pv_timestamps, focals, intrinsics_ox, intrinsics_oy, 
     intrinsics_width, intrinsics_height);
 
+  vector<long> human_timestamps;
+  vector<vector<MatrixXf>> list_joints_left;
+  vector<vector<MatrixXf>> list_joints_right;
+  vector<VectorXf> list_gaze_origins;
+  vector<VectorXf> list_gaze_directions;
+  vector<float> list_gaze_distances;
+  vector<MatrixXf> list_head_data;
+  read_human_data(human_timestamps, list_joints_left, list_joints_right,
+    list_gaze_origins, list_gaze_directions, list_gaze_distances, list_head_data);
+
   Eigen::MatrixXf D;
   Eigen::MatrixXf pointsRig;
   Eigen::MatrixXf pointsWorld;
@@ -499,21 +539,19 @@ void visualize_raw_data() {
   for (auto path : paths) {
     cout << "path " << kk << endl;
     long depth_timestamp = timestamps[kk];
+
     int pv_timestamp_idx = closest_timestamp_idx(depth_timestamp, pv_timestamps);
     long pv_timestamp = pv_timestamps[pv_timestamp_idx];
 
-    DepthData data = read_pgm(path); //TODO change path
+    int human_timestamp_idx = closest_timestamp_idx(depth_timestamp, human_timestamps);
+    long human_timestamp = human_timestamps[human_timestamp_idx];
+
+    DepthData data = read_pgm(path);
     all_depths.push_back(data);
 
-    vector<long> human_timestamps;
-    vector<vector<MatrixXf>> list_joints_left;
-    vector<vector<MatrixXf>> list_joints_right;
-    vector<VectorXf> list_gaze_origins;
-    vector<VectorXf> list_gaze_directions;
-    vector<float> list_gaze_distances;
-    vector<MatrixXf> list_head_data;
-    read_human_data(human_timestamps, list_joints_left, list_joints_right,
-      list_gaze_origins, list_gaze_directions, list_gaze_distances, list_head_data);
+    //TODO the rig2world matrix does not necessarily have the right timestamp..
+    compute_joints_positions(rig2world_matrices[kk], 
+      list_joints_left[human_timestamp_idx], list_joints_right[human_timestamp_idx]);
 
     depth_map_to_pc_px(D, data, lut, 0, 1);
 
@@ -564,6 +602,37 @@ int main(int argc, char *argv[]) {
     ones(i) = 1;
   }
 
+  E.resize(24, 2);
+  E << 
+  1, 2,
+  2, 3,
+  3, 4,
+  4, 5,
+
+  1, 6,
+  6, 7,
+  7, 8,
+  8, 9,
+  9, 10,
+
+  1, 11,
+  11, 12,
+  12, 13,
+  13, 14,
+  14, 15,
+
+  1, 16,
+  16, 17,
+  17, 18,
+  18, 19,
+  19, 20,
+
+  1, 21,
+  21, 22,
+  22, 23,
+  23, 24,
+  24, 25;
+
   visualize_raw_data();
 
   //visualize_pcds();
@@ -578,7 +647,7 @@ int main(int argc, char *argv[]) {
   viewer.callback_pre_draw = callback_pre_draw;
 
   viewer.core().set_rotation_type(igl::opengl::ViewerCore::ROTATION_TYPE_TRACKBALL);
-  viewer.data().point_size = 1;
+  viewer.data().point_size = 0.8f;
   Vector4f color(1, 1, 1, 1);
   viewer.core().background_color = color * 0.5f;
   //viewer.core().background_color.setOnes();
