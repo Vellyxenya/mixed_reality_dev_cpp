@@ -374,6 +374,91 @@ void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv
   }
 }
 
+void read_human_data(vector<long>& timestamps, vector<vector<MatrixXf>>& list_joints_left,
+  vector<vector<MatrixXf>>& list_joints_right,
+  vector<VectorXf>& list_gaze_origins,
+  vector<VectorXf>& list_gaze_directions,
+  vector<float>& list_gaze_distances,
+  vector<MatrixXf>& list_head_data) {
+
+  ifstream infile(folder+"2022-10-26-120549_head_hand_eye.csv");
+  string input_line = "";
+  const int joint_count = 26;
+
+  while(true) {
+    if(!getline(infile, input_line)) break;
+    stringstream line(input_line);
+    string next_val;
+
+    //Read timestamp
+    getline(line, next_val, ',');
+    timestamps.push_back(stol(next_val));
+
+    //Read head data
+    Eigen::MatrixXf Head(4, 4);
+    for(int j = 0; j < 4; j++) {
+      for(int i = 0; i < 4; i++) {
+        getline(line, next_val, ',');
+        Head(j, i) = std::stof(next_val);
+      }
+    }
+    list_head_data.push_back(Head);
+    
+    //Read left hand data
+    getline(line, next_val, ',');
+    bool left_hand_available = std::stoi(next_val) == 1;
+    vector<Eigen::MatrixXf> joints_left;
+    for(int joint = 0; joint < joint_count; joint++) {
+      Eigen::MatrixXf Joint(4, 4);
+      for(int j = 0; j < 4; j++) {
+        for(int i = 0; i < 4; i++) {
+          getline(line, next_val, ',');
+          Joint(j, i) = std::stof(next_val);
+        }
+      }
+      joints_left.push_back(Joint);
+    }
+    list_joints_left.push_back(joints_left);
+
+    //Read right hand data
+    getline(line, next_val, ',');
+    bool right_hand_available = std::stoi(next_val) == 1;
+    vector<Eigen::MatrixXf> joints_right;
+    for(int joint = 0; joint < joint_count; joint++) {
+      Eigen::MatrixXf Joint(4, 4);
+      for(int j = 0; j < 4; j++) {
+        for(int i = 0; i < 4; i++) {
+          getline(line, next_val, ',');
+          Joint(j, i) = std::stof(next_val);
+        }
+      }
+      joints_right.push_back(Joint);
+    }
+    list_joints_right.push_back(joints_right);
+
+    //Read gaze data
+    getline(line, next_val, ',');
+    bool gaze_available = std::stoi(next_val) == 1;
+    Eigen::VectorXf GazeOrigin(4);
+    for(int i = 0; i < 4; i++) {
+      getline(line, next_val, ',');
+      GazeOrigin(i) = std::stof(next_val);
+    }
+    list_gaze_origins.push_back(GazeOrigin);
+
+    Eigen::VectorXf GazeDirection(4);
+    for(int i = 0; i < 4; i++) {
+      getline(line, next_val, ',');
+      GazeDirection(i) = std::stof(next_val);
+    }
+    list_gaze_directions.push_back(GazeDirection);
+
+    getline(line, next_val, ',');
+    float gaze_distance = std::stof(next_val);
+    list_gaze_distances.push_back(gaze_distance);
+  }
+}
+
 void visualize_raw_data() {
   for (const auto & entry : fs::directory_iterator(folder+"Depth AHaT")) {
     string path = entry.path();
@@ -419,6 +504,16 @@ void visualize_raw_data() {
 
     DepthData data = read_pgm(path); //TODO change path
     all_depths.push_back(data);
+
+    vector<long> human_timestamps;
+    vector<vector<MatrixXf>> list_joints_left;
+    vector<vector<MatrixXf>> list_joints_right;
+    vector<VectorXf> list_gaze_origins;
+    vector<VectorXf> list_gaze_directions;
+    vector<float> list_gaze_distances;
+    vector<MatrixXf> list_head_data;
+    read_human_data(human_timestamps, list_joints_left, list_joints_right,
+      list_gaze_origins, list_gaze_directions, list_gaze_distances, list_head_data);
 
     depth_map_to_pc_px(D, data, lut, 0, 1);
 
@@ -484,6 +579,8 @@ int main(int argc, char *argv[]) {
 
   viewer.core().set_rotation_type(igl::opengl::ViewerCore::ROTATION_TYPE_TRACKBALL);
   viewer.data().point_size = 1;
+  Vector4f color(1, 1, 1, 1);
+  viewer.core().background_color = color * 0.5f;
   //viewer.core().background_color.setOnes();
   viewer.launch();
 }
