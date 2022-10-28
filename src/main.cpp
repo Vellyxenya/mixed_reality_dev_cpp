@@ -4,6 +4,7 @@
 #include <igl/opengl/glfw/Viewer.h>
 #include <igl/opengl/glfw/imgui/ImGuiMenu.h>
 #include <igl/opengl/glfw/imgui/ImGuiHelpers.h>
+#include <igl/slice.h>
 
 #include "Colors.h"
 
@@ -63,11 +64,10 @@ bool callback_key_down(Viewer& viewer, unsigned char key, int modifiers);
 
 void render_frame() {
   viewer.data().clear();
-  viewer.data().set_points(ddata[l], dcolors[l]);
+  viewer.data().add_points(ddata[l], dcolors[l]);
   //TODO calling set_edges twices overrides the first one
   viewer.data().set_edges(djointsleft[l], E, Eigen::RowVector3d(0, 0, 1));
   viewer.data().set_edges(djointsright[l], E, Eigen::RowVector3d(1, 0, 0));
-  //viewer.data().add_points(ddata[l], Eigen::RowVector3d(0, 0, 0));
 }
 
 //Compute what to display on the next frame
@@ -219,16 +219,17 @@ void depth_map_to_pc_px(Eigen::MatrixXf& D, const DepthData& depth_map,
 
   int remaining_points = 512 * 512 - total_removed;
 
-  Eigen::MatrixXf points_only(remaining_points, 3);
+  //Eigen::MatrixXf points_only(remaining_points, 3);
+  D.resize(remaining_points, 3);
   k = 0;
   for(int i = 0; i < 512*512; i++) {
     if(remove[i])
       continue;
-    points_only.row(k) = image.row(i);
+    D.row(k) = image.row(i);
     k++;
   }
   
-  D = points_only;
+  //D = points_only;
 }
 
 void apply_transformation(const Eigen::MatrixXf& T, const Eigen::MatrixXf& points, Eigen::MatrixXf& out, int out_dim) {
@@ -270,7 +271,7 @@ void read_rig2world(vector<Eigen::MatrixXf>& rig2world_vec, vector<long>& timest
 void read_pv_meta(vector<Eigen::MatrixXf>& pv2world_matrices, vector<long>& timestamps, 
   vector<std::pair<float, float>>& focals, float& intrinsics_ox, float& intrinsics_oy,
   int& intrinsics_width, int& intrinsics_height) {
-  ifstream infile(folder+"2022-10-26-120549_pv.txt");
+  ifstream infile(folder+"2022-10-27-122257_pv.txt");
   string input_line = "";
 
   getline(infile, input_line, ',');
@@ -352,7 +353,7 @@ Eigen::MatrixXf to_homogeneous(const Eigen::MatrixXf& points) {
 
 void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv2world, 
   float focalx, float focaly, float principalx, float principaly, int pvWidth, int pvHeight,
-  const vector<vector<RowVector3d>>& rgbImage, Eigen::MatrixXd& colors) {
+  const vector<vector<RowVector3d>>& rgbImage, Eigen::MatrixXd& colors, vector<int>& has_rgb_indices) {
 
   Eigen::MatrixXf Intrinsic(3, 3);
   Intrinsic << focalx, 0, principalx, 0, focaly, principaly, 0, 0, 1;
@@ -373,6 +374,7 @@ void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv
     int y = (int)(y_h / w);
     if (x >= 0 && x < pvWidth && y >= 0 && y < pvHeight) {
       colors.row(i) = rgbImage[y][pvWidth - x];
+      has_rgb_indices.push_back(i);
     } else {
       colors.row(i) = RowVector3d(0, 0, 0); //No color
       //TODO may want to mark these points as useless, i.e. discard them
@@ -387,7 +389,7 @@ void read_human_data(vector<long>& timestamps, vector<vector<MatrixXf>>& list_jo
   vector<float>& list_gaze_distances,
   vector<MatrixXf>& list_head_data) {
 
-  ifstream infile(folder+"2022-10-26-120549_head_hand_eye.csv");
+  ifstream infile(folder+"2022-10-27-122257_head_hand_eye.csv");
   string input_line = "";
   const int joint_count = 26;
 
@@ -535,6 +537,9 @@ void visualize_raw_data() {
   Eigen::MatrixXd V;
   Eigen::MatrixXd colors;
 
+  Eigen::MatrixXd ddata_only_rgb;
+  Eigen::MatrixXd dcolors_only_rgb;
+
   int kk = 0;
   for (auto path : paths) {
     cout << "path " << kk << endl;
@@ -553,7 +558,7 @@ void visualize_raw_data() {
     compute_joints_positions(rig2world_matrices[kk], 
       list_joints_left[human_timestamp_idx], list_joints_right[human_timestamp_idx]);
 
-    depth_map_to_pc_px(D, data, lut, 0, 1);
+    depth_map_to_pc_px(D, data, lut, 0.2, 0.9);
 
     //Read RGB Image
     vector<vector<RowVector3d>> rgbImage;
@@ -569,23 +574,33 @@ void visualize_raw_data() {
 
     //Project points from world coordinates to RGB
     //cout << "pointsWorld: " << pointsWorld.rows() << " " << pointsWorld.cols() << endl;
-    //cout << focals[kk].first << " " << focals[kk].second << " " << intrinsics_ox << " " << intrinsics_oy << endl; 
+    //cout << focals[kk].first << " " << focals[kk].second << " " << intrinsics_ox << " " << intrinsics_oy << endl;
+    vector<int> has_rgb_indices;
     project_on_pv(pointsWorld, pv2world_matrices[pv_timestamp_idx], 
       focals[kk].first, focals[kk].second, intrinsics_ox, intrinsics_oy, 
-      intrinsics_width, intrinsics_height, rgbImage, colors);
-    dcolors.push_back(colors);
+      intrinsics_width, intrinsics_height, rgbImage, colors, has_rgb_indices);
+    
+    V = pointsRig.cast<double>(); //Cast to double so that libigl is happy
+    
+    Eigen::MatrixXi rgb_indices(has_rgb_indices.size(), 1);
+    int fill_idx = 0;
+    for(int i : has_rgb_indices) {
+      rgb_indices(fill_idx++) = i;
+    }
+    igl::slice(V, rgb_indices, 1, ddata_only_rgb);
+    igl::slice(colors, rgb_indices, 1, dcolors_only_rgb);
 
-    //Cast to double so that libigl is happy
-    V = pointsRig.cast<double>();
-    ddata.push_back(V);
+    ddata.push_back(ddata_only_rgb);
+    dcolors.push_back(dcolors_only_rgb);
+
     kk++;
 
     //Debugging
-     if(kk == 20)
-       break;
+    // if(kk == 50)
+    //    break;
   }
   //Debugging
-  nb_frames = 20;
+  //nb_frames = 50;
 
   viewer.data().clear();
   viewer.data().add_points(V, Eigen::RowVector3d(0, 0, 0));
@@ -595,7 +610,7 @@ void visualize_raw_data() {
 int main(int argc, char *argv[]) {
 
   //folder = "../data/raw_ahat/";
-  folder = "../data/umbrella/";
+  folder = "../data/greenbox/";
 
   ones.resize(512 * 512);
   for(int i = 0; i < 512 * 512; i++) {
@@ -647,7 +662,7 @@ int main(int argc, char *argv[]) {
   viewer.callback_pre_draw = callback_pre_draw;
 
   viewer.core().set_rotation_type(igl::opengl::ViewerCore::ROTATION_TYPE_TRACKBALL);
-  viewer.data().point_size = 0.8f;
+  viewer.data().point_size = 2;
   Vector4f color(1, 1, 1, 1);
   viewer.core().background_color = color * 0.5f;
   //viewer.core().background_color.setOnes();
