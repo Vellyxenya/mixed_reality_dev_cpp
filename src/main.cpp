@@ -6,7 +6,6 @@
 #include <igl/opengl/glfw/imgui/ImGuiHelpers.h>
 #include <igl/slice.h>
 #include <imgui/imgui.h>
-
 #include <string>
 #include <iostream>
 #include <chrono>
@@ -62,6 +61,7 @@ string folder;
 int l = 0; //frame counter
 int nb_frames;
 bool is_first_frame = true;
+float min_dist_to_joints = 0.01;
 
 Eigen::MatrixXf to_homogeneous(const Eigen::MatrixXf& points);
 bool callback_pre_draw(Viewer& viewer);
@@ -77,6 +77,38 @@ void depth_map_to_pc_px(const DepthImage& depth_map, const Eigen::MatrixXf& cam_
 void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv2world, 
   float focalx, float focaly, float principalx, float principaly, int pvWidth, int pvHeight,
   const vector<vector<RowVector3d>>& rgbImage, Eigen::MatrixXd& colors, Eigen::MatrixXi& rgb_indices);
+
+bool point_too_close_to_hands(
+  const Eigen::MatrixXd& joints_left,
+  const Eigen::MatrixXd& joints_right,
+  const Eigen::RowVector3f& point) {
+  Eigen::RowVector3d dpoint = point.cast<double>();
+  for(int i = 0; i < joints_left.rows(); i++) {
+    if((joints_left.row(i) - dpoint).squaredNorm() < min_dist_to_joints) {
+      return true;
+    }
+  }
+  for(int i = 0; i < joints_right.rows(); i++) {
+    if((joints_right.row(i) - dpoint).squaredNorm() < min_dist_to_joints) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void discard_points_too_close_to_the_hands(
+  const Eigen::MatrixXd& joints_left,
+  const Eigen::MatrixXd& joints_right,
+  const Eigen::MatrixXf& pointsRig_all,
+  Eigen::MatrixXf& pointsRig) {
+  pointsRig.resize(pointsRig_all.rows(), 3);
+  int k = 0;
+  for(int i = 0; i < pointsRig_all.rows(); i++) {
+    //if(!point_too_close_to_hands(joints_left, joints_right, pointsRig_all.row(i)))
+      pointsRig.row(k++) = pointsRig_all.row(i);
+  }
+  pointsRig = pointsRig.block(0, 0, k, 3);
+}
 
 /**
  * @brief Main Processing function. Takes in all necessary data-structures and outputs
@@ -121,11 +153,14 @@ void process(
     joints_left, joints_right, djointsleft, djointsright);
 
   Eigen::MatrixXf pointsCam;
-  depth_map_to_pc_px(depthImage, lut, 0.2, 0.9, pointsCam);
+  depth_map_to_pc_px(depthImage, lut, 0.1, 0.7, pointsCam);
 
   //Transform points from cam coordinatse to rig coordinates
+  Eigen::MatrixXf pointsRig_all;
+  apply_transformation(cam2rig, pointsCam, pointsRig_all, 3);
+
   Eigen::MatrixXf pointsRig;
-  apply_transformation(cam2rig, pointsCam, pointsRig, 3);
+  discard_points_too_close_to_the_hands(djointsleft, djointsright, pointsRig_all, pointsRig);
 
   //Transform points from rig coordinates to world
   Eigen::MatrixXf pointsWorld;
@@ -165,7 +200,7 @@ bool callback_pre_draw(Viewer& viewer) {
     rig2world_matrices[l],
     pv2world_matrices[pv_timestamp_idx],
     cam2rig,
-    list_joints_left[human_timestamp_idx], 
+    list_joints_left[human_timestamp_idx],
     list_joints_right[human_timestamp_idx],
     lut,
     focals[l],
@@ -263,10 +298,8 @@ RowVector3d hand_color_1(181.0/255, 174.0/255, 150.0/255);
 RowVector3d hand_color_2(79.0/255, 71.0/255, 74.0/255);
 RowVector3d hand_color_3(107.0/255, 81.0/255, 43.0/255);
 bool valid_color(const RowVector3d& color) {
-  /*float tolerance = 0.6;
-  return (color - hand_color_1).squaredNorm() > tolerance || (color - hand_color_2).squaredNorm() > tolerance
-   || (color - hand_color_3).squaredNorm() > tolerance;*/
-  return color.y() > (color.x() + 0.01) && color.y() > (color.z() + 0.01);
+  return true;
+  //return color.y() > (color.x() + 0.01) && color.y() > (color.z() + 0.01);
 }
 
 void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv2world, 
@@ -415,7 +448,7 @@ void initialize() {
 }
 
 int main(int argc, char *argv[]) {
-  folder = "../data/greenbox/"; //Set data path here
+  folder = "../data/brownbag/"; //Set data path here
 
   initialize();
 
