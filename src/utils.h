@@ -2,7 +2,6 @@
 #define UTILS_H
 
 #include <string>
-#include <Eigen/Dense>
 
 bool string_contains(std::string s, char c) {
   return s.find(c) != std::string::npos;

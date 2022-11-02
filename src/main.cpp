@@ -16,7 +16,6 @@
 #include <math.h>
 #include <map>
 
-#include "utils.h"
 #include "loading.h"
 
 using namespace std;
