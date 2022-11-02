@@ -22,6 +22,8 @@ using namespace std;
 using namespace Eigen;
 using Viewer = igl::opengl::glfw::Viewer;
 
+#define NB_DEPTH_PIXELS (512 * 512)
+
 //Timestamps datastructures
 vector<long> timestamps;
 vector<long> pv_timestamps;
@@ -95,12 +97,12 @@ void process(
   compute_joints_positions(rig2world, 
     joints_left, joints_right, djointsleft, djointsright);
 
-  Eigen::MatrixXf D;
-  depth_map_to_pc_px(D, depthImage, lut, 0.2, 0.9);
+  Eigen::MatrixXf pointsCam;
+  depth_map_to_pc_px(depthImage, lut, 0.2, 0.9, pointsCam);
 
   //Transform points from cam coordinatse to rig coordinates
   Eigen::MatrixXf pointsRig;
-  apply_transformation(cam2rig, D, pointsRig, 3);
+  apply_transformation(cam2rig, pointsCam, pointsRig, 3);
 
   //Transform points from rig coordinates to world
   Eigen::MatrixXf pointsWorld;
@@ -169,14 +171,15 @@ bool callback_pre_draw(Viewer& viewer) {
   return false;
 }
 
-void depth_map_to_pc_px(Eigen::MatrixXf& D, const DepthImage& depth_map, 
-  const Eigen::MatrixXf& cam_calibration, float clamp_min, float clamp_max) {
+void depth_map_to_pc_px(const DepthImage& depth_map, 
+  const Eigen::MatrixXf& cam_calibration, float clamp_min, float clamp_max,
+  Eigen::MatrixXf& pointsCam) {
   clamp_min *= 1000;
   clamp_max *= 1000;
 
-  Eigen::MatrixXf image(512*512, 3);
+  Eigen::MatrixXf image(NB_DEPTH_PIXELS, 3);
   vector<int> indices_to_remove;
-  vector<bool> remove = vector<bool>(512*512, false);
+  vector<bool> remove = vector<bool>(NB_DEPTH_PIXELS, false);
   int k = 0;
   int total_removed = 0;
   for(int j = 0; j < depth_map.size(); j++) {
@@ -196,13 +199,13 @@ void depth_map_to_pc_px(Eigen::MatrixXf& D, const DepthImage& depth_map,
     }
   }
 
-  int remaining_points = 512 * 512 - total_removed;
-  D.resize(remaining_points, 3);
+  int remaining_points = NB_DEPTH_PIXELS - total_removed;
+  pointsCam.resize(remaining_points, 3);
   k = 0;
-  for(int i = 0; i < 512*512; i++) {
+  for(int i = 0; i < NB_DEPTH_PIXELS; i++) {
     if(remove[i])
       continue;
-    D.row(k) = image.row(i);
+    pointsCam.row(k) = image.row(i);
     k++;
   }
 }
@@ -345,8 +348,8 @@ void read_data() {
 
 void initialize() {
   //Used for padding in homogeneous coordinates
-  ones.resize(512 * 512);
-  for(int i = 0; i < 512 * 512; i++) {
+  ones.resize(NB_DEPTH_PIXELS);
+  for(int i = 0; i < NB_DEPTH_PIXELS; i++) {
     ones(i) = 1;
   }
 
@@ -385,7 +388,7 @@ void initialize() {
 
 int main(int argc, char *argv[]) {
   //folder = "../data/raw_ahat/";
-  folder = "../data/greenbox/";
+  folder = "../data/greenbox/"; //Set data path here
 
   initialize();
 
