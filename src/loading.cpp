@@ -11,9 +11,6 @@ using std::vector;
 typedef std::vector<std::vector<unsigned short int>> DepthImage;
 typedef vector<vector<Eigen::RowVector3d>> RGBImage;
 
-/**************************
-********* LOADING *********
-***************************/
 int read_paths(std::string folder, std::vector<std::string>& paths) {
   for (const auto & entry : std::filesystem::directory_iterator(folder+"Depth AHaT")) {
     std::string path = entry.path();
@@ -31,8 +28,7 @@ DepthImage read_pgm(std::string pgm_file_path) {
   std::ifstream infile(pgm_file_path, std::ios::binary);
 
   std::string inputLine = "";
-
-  std::getline(infile, inputLine); // read the first line : P5
+  std::getline(infile, inputLine); //read the first line : P5
   if(inputLine.compare("P5") != 0) std::cerr << "Version error" << std::endl;
 
   ss << infile.rdbuf(); //read the third line : width and height
@@ -42,10 +38,8 @@ DepthImage read_pgm(std::string pgm_file_path) {
   ss >> max_val;
   ss.ignore();
 
-  unsigned short int pixel;
-
-  DepthImage data(num_of_rows, std::vector<unsigned short int>(num_of_cols));
-
+  uint16_t pixel;
+  DepthImage data(num_of_rows, std::vector<uint16_t>(num_of_cols));
   for (row = 0; row < num_of_rows; row++) {
     for (col = 0; col < num_of_cols; col++) {
       ss.read((char*)&pixel, 2);
@@ -53,7 +47,6 @@ DepthImage read_pgm(std::string pgm_file_path) {
       data[row][col] = pixel;
     }
   }
-
   return data;
 }
 

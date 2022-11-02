@@ -2,6 +2,7 @@
 #include <igl/readTGF.h>
 #include <igl/readDMAT.h>
 #include <igl/opengl/glfw/Viewer.h>
+
 #include <igl/opengl/glfw/imgui/ImGuiMenu.h>
 #include <igl/opengl/glfw/imgui/ImGuiHelpers.h>
 #include <igl/slice.h>
@@ -15,7 +16,9 @@
 #include <math.h>
 #include <map>
 
+#include "utils.h"
 #include "loading.h"
+#include "processing.h"
 
 using namespace std;
 using namespace Eigen;
@@ -62,6 +65,10 @@ int l = 0; //frame counter
 int nb_frames;
 bool is_first_frame = true;
 float min_dist_to_joints = 0.01;
+
+//Temp data
+vector<Eigen::Vector3d> prev_points_vec;
+vector<Eigen::Matrix4d> transformations;
 
 Eigen::MatrixXf to_homogeneous(const Eigen::MatrixXf& points);
 bool callback_pre_draw(Viewer& viewer);
@@ -216,12 +223,30 @@ bool callback_pre_draw(Viewer& viewer) {
   //TODO calling set_edges twices overrides the first one
   viewer.data().set_edges(JointsLeft, E, Eigen::RowVector3d(0, 0, 1));
   viewer.data().set_edges(JointsRight, E, Eigen::RowVector3d(1, 0, 0));
-  if(is_first_frame)
-    viewer.core().align_camera_center(Points);
 
+  int minimum_points = 50; //TODO probably increase this
+  int nb_warmup_frames = 30;
+  if(Points.rows() > minimum_points && l >= nb_warmup_frames) { //valid frame
+    std::vector<Eigen::Vector3d> points_vec = eigen_to_vec(Points);
+    if(is_first_frame) {
+      viewer.core().align_camera_center(Points);
+      is_first_frame = false;
+    } else {
+      Eigen::Matrix4d T = get_transformation(points_vec, prev_points_vec);
+      transformations.push_back(T);
+    }
+    prev_points_vec = points_vec;
+  }
+    
   ++l;
-  l %= nb_frames;
-  is_first_frame = false;
+  cout << "Frame " << l << endl;
+  if(l == nb_frames) {
+    //l %= nb_frames; looping behavior
+    for(int i = 0; i < transformations.size(); i++) {
+      cout << transformations[i] << endl;
+    }
+    exit(0);
+  }
 
   return false;
 }
@@ -239,7 +264,7 @@ void depth_map_to_pc_px(const DepthImage& depth_map,
   int total_removed = 0;
   for(int j = 0; j < depth_map.size(); j++) {
     for(int i = 0; i < depth_map[0].size(); i++) {
-      float d = depth_map[j][i]; // / 65536.0;
+      float d = depth_map[j][i];
       if(d < clamp_min || d > clamp_max) {
         d = 0;
         indices_to_remove.push_back(k);
@@ -298,7 +323,7 @@ RowVector3d hand_color_1(181.0/255, 174.0/255, 150.0/255);
 RowVector3d hand_color_2(79.0/255, 71.0/255, 74.0/255);
 RowVector3d hand_color_3(107.0/255, 81.0/255, 43.0/255);
 bool valid_color(const RowVector3d& color) {
-  return true;
+  return color.squaredNorm() < 0.9 && color.squaredNorm() > 0.1;
   //return color.y() > (color.x() + 0.01) && color.y() > (color.z() + 0.01);
 }
 
