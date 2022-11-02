@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <limits.h>
 #include <math.h>
+#include <map>
 
 #include "utils.h"
 #include "loading.h"
@@ -223,6 +224,12 @@ void visualize_raw_data() {
   read_human_data(folder, human_timestamps, list_joints_left, list_joints_right,
     list_gaze_origins, list_gaze_directions, list_gaze_distances, list_head_data);
 
+  //Read RGB Image
+  map<long, RGBImage> rgb_images;
+  for(long pv_timestamp : pv_timestamps) {
+    rgb_images[pv_timestamp] = read_rgb(folder, pv_timestamp, intrinsics_width, intrinsics_height);
+  }
+
   Eigen::MatrixXf D;
   Eigen::MatrixXf pointsRig;
   Eigen::MatrixXf pointsWorld;
@@ -254,10 +261,6 @@ void visualize_raw_data() {
 
     depth_map_to_pc_px(D, data, lut, 0.2, 0.9);
 
-    //Read RGB Image
-    vector<vector<RowVector3d>> rgbImage;
-    read_rgb(folder, pv_timestamp, intrinsics_width, intrinsics_height, rgbImage);
-
     //Transform points from cam coordinatse to rig coordinates
     apply_transformation(cam2rig, D, pointsRig, 3);
 
@@ -268,7 +271,7 @@ void visualize_raw_data() {
     vector<int> has_rgb_indices;
     project_on_pv(pointsWorld, pv2world_matrices[pv_timestamp_idx], 
       focals[kk].first, focals[kk].second, intrinsics_ox, intrinsics_oy, 
-      intrinsics_width, intrinsics_height, rgbImage, colors, has_rgb_indices);
+      intrinsics_width, intrinsics_height, rgb_images[pv_timestamp], colors, has_rgb_indices);
     
     V = pointsRig.cast<double>(); //Cast to double so that libigl is happy
     

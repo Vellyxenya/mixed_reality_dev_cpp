@@ -14,6 +14,7 @@
 using std::vector;
 
 typedef std::vector<std::vector<unsigned short int>> DepthData;
+typedef vector<vector<Eigen::RowVector3d>> RGBImage;
 
 /**************************
 ********* LOADING *********
@@ -61,14 +62,14 @@ DepthData read_pgm(std::string pgm_file_path) {
   return data;
 }
 
-void read_rgb(std::string folder, long pv_timestamp, int width, int height, vector<vector<Eigen::RowVector3d>>& colors) {
+RGBImage read_rgb(std::string folder, long pv_timestamp, int width, int height) {
   std::string file_path = folder+"PV/"+std::to_string(pv_timestamp)+".bytes";
   std::ifstream infile(file_path, std::ios::binary);
   unsigned int val;
   int y = 0;
   int x = 0;
   Eigen::MatrixXf RGB;
-  colors = vector<vector<Eigen::RowVector3d>>(height, vector<Eigen::RowVector3d>(width));
+  RGBImage colors = RGBImage(height, vector<Eigen::RowVector3d>(width));
   RGB.resize(height, width);
   for(int y = 0; y < height; y++) {
     for(int x = 0; x < width; x++) {
@@ -79,6 +80,7 @@ void read_rgb(std::string folder, long pv_timestamp, int width, int height, vect
       colors[y][x] = Eigen::RowVector3d(r, g, b) / 255.0;
     }
   }
+  return colors;
 }
 
 void read_extrinsics(std::string folder, Eigen::MatrixXf& Ext) {
