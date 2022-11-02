@@ -225,10 +225,20 @@ void visualize_raw_data() {
     list_gaze_origins, list_gaze_directions, list_gaze_distances, list_head_data);
 
   //Read RGB Image
+  cout << "Reading RGB data" << endl;
   map<long, RGBImage> rgb_images;
   for(long pv_timestamp : pv_timestamps) {
+    cout << "." << flush;
+
     rgb_images[pv_timestamp] = read_rgb(folder, pv_timestamp, intrinsics_width, intrinsics_height);
   }
+
+  cout << "\nReading Depth data" << endl;
+  for(const auto path : paths) {
+    cout << "." << flush;
+    all_depths.push_back(read_pgm(path));
+  }
+  cout << endl;
 
   Eigen::MatrixXf D;
   Eigen::MatrixXf pointsRig;
@@ -240,8 +250,9 @@ void visualize_raw_data() {
   Eigen::MatrixXd dcolors_only_rgb;
 
   int max_frames = 300;
+  
   int kk = 0;
-  for (auto path : paths) {
+  for (DepthData data : all_depths) {
     cout << "path " << kk << endl;
     long depth_timestamp = timestamps[kk];
 
@@ -250,9 +261,6 @@ void visualize_raw_data() {
 
     int human_timestamp_idx = closest_timestamp_idx(depth_timestamp, human_timestamps);
     long human_timestamp = human_timestamps[human_timestamp_idx];
-
-    DepthData data = read_pgm(path);
-    all_depths.push_back(data);
 
     //TODO the rig2world matrix does not necessarily have the right timestamp..
     compute_joints_positions(rig2world_matrices[kk], 
