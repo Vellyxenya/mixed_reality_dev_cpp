@@ -13,7 +13,7 @@
 
 using std::vector;
 
-typedef std::vector<std::vector<unsigned short int>> DepthData;
+typedef std::vector<std::vector<unsigned short int>> DepthImage;
 typedef vector<vector<Eigen::RowVector3d>> RGBImage;
 
 /**************************
@@ -30,7 +30,7 @@ int read_paths(std::string folder, std::vector<std::string>& paths) {
   return paths.size();
 }
 
-DepthData read_pgm(std::string pgm_file_path) {  
+DepthImage read_pgm(std::string pgm_file_path) {  
   int row = 0, col = 0, num_of_rows = 0, num_of_cols = 0;
   std::stringstream ss;    
   std::ifstream infile(pgm_file_path, std::ios::binary);
@@ -49,7 +49,7 @@ DepthData read_pgm(std::string pgm_file_path) {
 
   unsigned short int pixel;
 
-  DepthData data(num_of_rows, std::vector<unsigned short int>(num_of_cols));
+  DepthImage data(num_of_rows, std::vector<unsigned short int>(num_of_cols));
 
   for (row = 0; row < num_of_rows; row++) {
     for (col = 0; col < num_of_cols; col++) {

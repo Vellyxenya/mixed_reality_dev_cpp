@@ -5,7 +5,6 @@
 #include <igl/opengl/glfw/imgui/ImGuiMenu.h>
 #include <igl/opengl/glfw/imgui/ImGuiHelpers.h>
 #include <igl/slice.h>
-
 #include <imgui/imgui.h>
 
 #include <string>
@@ -24,43 +23,155 @@ using namespace std;
 using namespace Eigen;
 using Viewer = igl::opengl::glfw::Viewer;
 
-std::vector<DepthData> all_depths;
+//Timestamps datastructures
+vector<long> timestamps;
+vector<long> pv_timestamps;
+vector<long> human_timestamps;
+
+//Transformation matrices
+vector<Eigen::MatrixXf> rig2world_matrices;
+vector<Eigen::MatrixXf> pv2world_matrices;
+Eigen::MatrixXf cam2rig;
+
+//RGB Images
+map<long, RGBImage> rgb_images;
+
+//Depth Images
+std::vector<DepthImage> depth_images;
+
+//Joints data
+vector<vector<MatrixXf>> list_joints_left;
+vector<vector<MatrixXf>> list_joints_right;
+
+//Intrinsics data
+vector<std::pair<float, float>> focals;
+float intrinsics_ox, intrinsics_oy;
+int intrinsics_width, intrinsics_height;
+
+//Lookup table
+Eigen::MatrixXf lut;
+
 std::vector<string> paths;
-std::vector<Eigen::MatrixXd> ddata;
-std::vector<Eigen::MatrixXd> dcolors;
-std::vector<Eigen::MatrixXd> djointsleft;
-std::vector<Eigen::MatrixXd> djointsright;
-Eigen::MatrixXd V;
-Eigen::MatrixXi E;
+Eigen::MatrixXi E; //Edges between joints
 
 Eigen::VectorXf ones;
 Viewer viewer;
 string folder;
 
-int l; //frame counter
+int l = 0; //frame counter
 int nb_frames;
+bool is_first_frame = true;
 
 bool callback_pre_draw(Viewer& viewer);
+void apply_transformation(const Eigen::MatrixXf& T, const Eigen::MatrixXf& points, Eigen::MatrixXf& out, int out_dim);
+Eigen::MatrixXf to_homogeneous(const Eigen::MatrixXf& points);
+int closest_timestamp_idx(long ts, vector<long> timestamps);
+void depth_map_to_pc_px(Eigen::MatrixXf& D, const DepthImage& depth_map, 
+  const Eigen::MatrixXf& cam_calibration, float clamp_min = 0, float clamp_max = 1);
+bool valid_color(const RowVector3d& color);
+void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv2world, 
+  float focalx, float focaly, float principalx, float principaly, int pvWidth, int pvHeight,
+  const vector<vector<RowVector3d>>& rgbImage, Eigen::MatrixXd& colors, vector<int>& has_rgb_indices);
+void compute_joints_positions(const Eigen::MatrixXf& world2rig, const vector<MatrixXf>& joints, MatrixXd& djoints);
+void compute_joints_positions(const Eigen::MatrixXf& rig2world_matrix,
+  const vector<MatrixXf>& joints_left, const vector<MatrixXf>& joints_right,
+  MatrixXd& djoints_left, MatrixXd& djoints_right);
 
-void render_frame() {
+void process(
+  const DepthImage& depthImage,
+  const RGBImage& rgbImage,
+  const Eigen::MatrixXf& rig2world,
+  const Eigen::MatrixXf& pv2world,
+  const Eigen::MatrixXf& cam2rig,
+  const std::vector<Eigen::MatrixXf>& joints_left,
+  const std::vector<Eigen::MatrixXf>& joints_right,
+  const Eigen::MatrixXf& lut,
+  const std::pair<float, float>& focals,
+  const float intrinsics_ox, const float intrinsics_oy, 
+  const int intrinsics_width, const int intrinsics_height,
+  const bool first_frame) {
+
+  Eigen::MatrixXd djointsleft;
+  Eigen::MatrixXd djointsright;
+  compute_joints_positions(rig2world, 
+    joints_left, joints_right, djointsleft, djointsright);
+
+  Eigen::MatrixXf D;
+  depth_map_to_pc_px(D, depthImage, lut, 0.2, 0.9);
+
+  //Transform points from cam coordinatse to rig coordinates
+  Eigen::MatrixXf pointsRig;
+  apply_transformation(cam2rig, D, pointsRig, 3);
+
+  //Transform points from rig coordinates to world
+  Eigen::MatrixXf pointsWorld;
+  apply_transformation(rig2world, pointsRig, pointsWorld, 3);
+
+  //Project points from world coordinates to RGB
+  Eigen::MatrixXd colors;
+  vector<int> has_rgb_indices;
+  project_on_pv(pointsWorld, pv2world, 
+    focals.first, focals.second, intrinsics_ox, intrinsics_oy, 
+    intrinsics_width, intrinsics_height, rgbImage, colors, has_rgb_indices);
+
+  /**********************
+  *** Libigl specific ***
+  ***********************/
+  Eigen::MatrixXd V = pointsRig.cast<double>(); //Cast to double so that libigl is happy
+  
+  Eigen::MatrixXi rgb_indices(has_rgb_indices.size(), 1);
+  int fill_idx = 0;
+  for(int i : has_rgb_indices) {
+    rgb_indices(fill_idx++) = i;
+  }
+  Eigen::MatrixXd ddata_only_rgb;
+  Eigen::MatrixXd dcolors_only_rgb;
+  igl::slice(V, rgb_indices, 1, ddata_only_rgb);
+  igl::slice(colors, rgb_indices, 1, dcolors_only_rgb);
+
   viewer.data().clear();
-  viewer.data().add_points(ddata[l], dcolors[l]);
+  viewer.data().add_points(ddata_only_rgb, dcolors_only_rgb);
   //TODO calling set_edges twices overrides the first one
-  viewer.data().set_edges(djointsleft[l], E, Eigen::RowVector3d(0, 0, 1));
-  viewer.data().set_edges(djointsright[l], E, Eigen::RowVector3d(1, 0, 0));
+  viewer.data().set_edges(djointsleft, E, Eigen::RowVector3d(0, 0, 1));
+  viewer.data().set_edges(djointsright, E, Eigen::RowVector3d(1, 0, 0));
+  if(first_frame)
+    viewer.core().align_camera_center(ddata_only_rgb);
 }
 
 //Compute what to display on the next frame
 bool callback_pre_draw(Viewer& viewer) {
-  //Update frame count
+  long depth_timestamp = timestamps[l];
+
+  int pv_timestamp_idx = closest_timestamp_idx(depth_timestamp, pv_timestamps);
+  long pv_timestamp = pv_timestamps[pv_timestamp_idx];
+
+  int human_timestamp_idx = closest_timestamp_idx(depth_timestamp, human_timestamps);
+  long human_timestamp = human_timestamps[human_timestamp_idx];
+
+  //TODO the rig2world_matrices[l] does not necessarily have the right timestamp..
+  process(
+    depth_images[l],
+    rgb_images[pv_timestamp],
+    rig2world_matrices[l],
+    pv2world_matrices[pv_timestamp_idx],
+    cam2rig,
+    list_joints_left[human_timestamp_idx], 
+    list_joints_right[human_timestamp_idx],
+    lut,
+    focals[l],
+    intrinsics_ox, intrinsics_oy,
+    intrinsics_width, intrinsics_height,
+    is_first_frame);
+
   ++l;
   l %= nb_frames;
-  render_frame();
+  is_first_frame = false;
+
   return false;
 }
 
-void depth_map_to_pc_px(Eigen::MatrixXf& D, const DepthData& depth_map, 
-  const Eigen::MatrixXf& cam_calibration, float clamp_min = 0, float clamp_max = 1) {
+void depth_map_to_pc_px(Eigen::MatrixXf& D, const DepthImage& depth_map, 
+  const Eigen::MatrixXf& cam_calibration, float clamp_min, float clamp_max) {
   clamp_min *= 1000;
   clamp_max *= 1000;
 
@@ -171,7 +282,7 @@ void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv
   }
 }
 
-void compute_joints_positions(const Eigen::MatrixXf& world2rig, const vector<MatrixXf>& joints, vector<MatrixXd>& djoints) {
+void compute_joints_positions(const Eigen::MatrixXf& world2rig, const vector<MatrixXf>& joints, MatrixXd& djoints) {
   Eigen::MatrixXd Joints(26, 3);
   int i = 0;
   for(MatrixXf Joint : joints) {
@@ -179,12 +290,12 @@ void compute_joints_positions(const Eigen::MatrixXf& world2rig, const vector<Mat
     Joints.row(i) = RowVector3d(joint_point(0), joint_point(1), joint_point(2));
     i++;
   }
-  djoints.push_back(Joints);
+  djoints = Joints; //TODO simplify this
 }
 
 void compute_joints_positions(const Eigen::MatrixXf& rig2world_matrix,
     const vector<MatrixXf>& joints_left, const vector<MatrixXf>& joints_right,
-    vector<MatrixXd>& djoints_left, vector<MatrixXd>& djoints_right) {
+    MatrixXd& djoints_left, MatrixXd& djoints_right) {
 
   Eigen::MatrixXf world2rig = rig2world_matrix.inverse();
 
@@ -192,31 +303,20 @@ void compute_joints_positions(const Eigen::MatrixXf& rig2world_matrix,
   compute_joints_positions(world2rig, joints_right, djoints_right);
 }
 
-void visualize_raw_data() {
+void read_data() {
   nb_frames = read_paths(folder, paths);
 
   Eigen::MatrixXf Ext;
   read_extrinsics(folder, Ext);
-  Eigen::MatrixXf cam2rig = Ext.inverse();
+  cam2rig = Ext.inverse();
 
-  vector<Eigen::MatrixXf> rig2world_matrices;
-  vector<long> timestamps;
   read_rig2world(folder, rig2world_matrices, timestamps);
 
-  Eigen::MatrixXf lut;
   read_lut(folder, lut);
 
-  vector<Eigen::MatrixXf> pv2world_matrices;
-  vector<long> pv_timestamps;
-  vector<std::pair<float, float>> focals;
-  float intrinsics_ox, intrinsics_oy;
-  int intrinsics_width, intrinsics_height;
   read_pv_meta(folder, pv2world_matrices, pv_timestamps, focals, intrinsics_ox, intrinsics_oy, 
     intrinsics_width, intrinsics_height);
 
-  vector<long> human_timestamps;
-  vector<vector<MatrixXf>> list_joints_left;
-  vector<vector<MatrixXf>> list_joints_right;
   vector<VectorXf> list_gaze_origins;
   vector<VectorXf> list_gaze_directions;
   vector<float> list_gaze_distances;
@@ -226,86 +326,22 @@ void visualize_raw_data() {
 
   //Read RGB Image
   cout << "Reading RGB data" << endl;
-  map<long, RGBImage> rgb_images;
   for(long pv_timestamp : pv_timestamps) {
     cout << "." << flush;
-
     rgb_images[pv_timestamp] = read_rgb(folder, pv_timestamp, intrinsics_width, intrinsics_height);
   }
 
   cout << "\nReading Depth data" << endl;
   for(const auto path : paths) {
     cout << "." << flush;
-    all_depths.push_back(read_pgm(path));
+    depth_images.push_back(read_pgm(path));
   }
   cout << endl;
 
-  Eigen::MatrixXf D;
-  Eigen::MatrixXf pointsRig;
-  Eigen::MatrixXf pointsWorld;
-  Eigen::MatrixXd V;
-  Eigen::MatrixXd colors;
-
-  Eigen::MatrixXd ddata_only_rgb;
-  Eigen::MatrixXd dcolors_only_rgb;
-
-  int max_frames = 300;
-  
-  int kk = 0;
-  for (DepthData data : all_depths) {
-    cout << "path " << kk << endl;
-    long depth_timestamp = timestamps[kk];
-
-    int pv_timestamp_idx = closest_timestamp_idx(depth_timestamp, pv_timestamps);
-    long pv_timestamp = pv_timestamps[pv_timestamp_idx];
-
-    int human_timestamp_idx = closest_timestamp_idx(depth_timestamp, human_timestamps);
-    long human_timestamp = human_timestamps[human_timestamp_idx];
-
-    //TODO the rig2world matrix does not necessarily have the right timestamp..
-    compute_joints_positions(rig2world_matrices[kk], 
-      list_joints_left[human_timestamp_idx], list_joints_right[human_timestamp_idx],
-      djointsleft, djointsright);
-
-    depth_map_to_pc_px(D, data, lut, 0.2, 0.9);
-
-    //Transform points from cam coordinatse to rig coordinates
-    apply_transformation(cam2rig, D, pointsRig, 3);
-
-    //Transform points from rig coordinates to world
-    apply_transformation(rig2world_matrices[kk], pointsRig, pointsWorld, 3);
-
-    //Project points from world coordinates to RGB
-    vector<int> has_rgb_indices;
-    project_on_pv(pointsWorld, pv2world_matrices[pv_timestamp_idx], 
-      focals[kk].first, focals[kk].second, intrinsics_ox, intrinsics_oy, 
-      intrinsics_width, intrinsics_height, rgb_images[pv_timestamp], colors, has_rgb_indices);
-    
-    V = pointsRig.cast<double>(); //Cast to double so that libigl is happy
-    
-    Eigen::MatrixXi rgb_indices(has_rgb_indices.size(), 1);
-    int fill_idx = 0;
-    for(int i : has_rgb_indices) {
-      rgb_indices(fill_idx++) = i;
-    }
-    igl::slice(V, rgb_indices, 1, ddata_only_rgb);
-    igl::slice(colors, rgb_indices, 1, dcolors_only_rgb);
-
-    ddata.push_back(ddata_only_rgb);
-    dcolors.push_back(dcolors_only_rgb);
-
-    kk++;
-
-    //Debugging
-    if(kk == max_frames)
-      break;
-  }
-  //Debugging
-  nb_frames = max_frames;
+  size_t max_frames = 300;
+  nb_frames = min(max_frames, depth_images.size());
 
   viewer.data().clear();
-  viewer.data().add_points(V, Eigen::RowVector3d(0, 0, 0));
-  viewer.core().align_camera_center(V);
 }
 
 void initialize() {
@@ -354,7 +390,7 @@ int main(int argc, char *argv[]) {
 
   initialize();
 
-  visualize_raw_data();
+  read_data();
 
   //Setup visualizer
   igl::opengl::glfw::imgui::ImGuiMenu menu;
