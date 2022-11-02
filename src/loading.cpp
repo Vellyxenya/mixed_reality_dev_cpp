@@ -137,7 +137,8 @@ void read_rig2world(std::string folder, std::vector<Eigen::MatrixXf>& rig2world_
 void read_pv_meta(std::string folder, std::vector<Eigen::MatrixXf>& pv2world_matrices, std::vector<long>& timestamps, 
   std::vector<std::pair<float, float>>& focals, float& intrinsics_ox, float& intrinsics_oy,
   int& intrinsics_width, int& intrinsics_height) {
-  std::ifstream infile(folder+"2022-10-27-122257_pv.txt");
+  
+  std::ifstream infile(find_file_ending_with(folder, "_pv.txt"));
   std::string input_line = "";
 
   getline(infile, input_line, ',');
@@ -181,7 +182,7 @@ void read_human_data(std::string folder, vector<long>& timestamps, vector<vector
   vector<float>& list_gaze_distances,
   vector<Eigen::MatrixXf>& list_head_data) {
 
-  std::ifstream infile(folder+"2022-10-27-122257_head_hand_eye.csv");
+  std::ifstream infile(find_file_ending_with(folder, ".csv"));
   std::string input_line = "";
   const int joint_count = 26;
 
