@@ -63,21 +63,43 @@ int l = 0; //frame counter
 int nb_frames;
 bool is_first_frame = true;
 
-bool callback_pre_draw(Viewer& viewer);
-void apply_transformation(const Eigen::MatrixXf& T, const Eigen::MatrixXf& points, Eigen::MatrixXf& out, int out_dim);
 Eigen::MatrixXf to_homogeneous(const Eigen::MatrixXf& points);
-int closest_timestamp_idx(long ts, vector<long> timestamps);
-void depth_map_to_pc_px(Eigen::MatrixXf& D, const DepthImage& depth_map, 
-  const Eigen::MatrixXf& cam_calibration, float clamp_min = 0, float clamp_max = 1);
+bool callback_pre_draw(Viewer& viewer);
 bool valid_color(const RowVector3d& color);
-void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv2world, 
-  float focalx, float focaly, float principalx, float principaly, int pvWidth, int pvHeight,
-  const vector<vector<RowVector3d>>& rgbImage, Eigen::MatrixXd& colors, vector<int>& has_rgb_indices);
+void apply_transformation(const Eigen::MatrixXf& T, const Eigen::MatrixXf& points, Eigen::MatrixXf& out, int out_dim);
+int closest_timestamp_idx(long ts, vector<long> timestamps);
 void compute_joints_positions(const Eigen::MatrixXf& world2rig, const vector<MatrixXf>& joints, MatrixXd& djoints);
 void compute_joints_positions(const Eigen::MatrixXf& rig2world_matrix,
   const vector<MatrixXf>& joints_left, const vector<MatrixXf>& joints_right,
   MatrixXd& djoints_left, MatrixXd& djoints_right);
+void depth_map_to_pc_px(const DepthImage& depth_map, const Eigen::MatrixXf& cam_calibration, 
+  float clamp_min, float clamp_max, Eigen::MatrixXf& pointsCam);
+void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv2world, 
+  float focalx, float focaly, float principalx, float principaly, int pvWidth, int pvHeight,
+  const vector<vector<RowVector3d>>& rgbImage, Eigen::MatrixXd& colors, Eigen::MatrixXi& rgb_indices);
 
+/**
+ * @brief Main Processing function. Takes in all necessary data-structures and outputs
+ * the processed and colored point cloud
+ * 
+ * @param depthImage 
+ * @param rgbImage 
+ * @param rig2world 
+ * @param pv2world 
+ * @param cam2rig 
+ * @param joints_left 
+ * @param joints_right 
+ * @param lut 
+ * @param focals 
+ * @param intrinsics_ox 
+ * @param intrinsics_oy 
+ * @param intrinsics_width 
+ * @param intrinsics_height 
+ * @param djointsleft Output joint positions (left)
+ * @param djointsright Output joint positions (right)
+ * @param ddata_only_rgb Output points
+ * @param dcolors_only_rgb colors corrseponding to the output points
+ */
 void process(
   const DepthImage& depthImage,
   const RGBImage& rgbImage,
@@ -90,10 +112,11 @@ void process(
   const std::pair<float, float>& focals,
   const float intrinsics_ox, const float intrinsics_oy, 
   const int intrinsics_width, const int intrinsics_height,
-  const bool first_frame) {
+  Eigen::MatrixXd& djointsleft,
+  Eigen::MatrixXd& djointsright,
+  Eigen::MatrixXd& ddata_only_rgb,
+  Eigen::MatrixXd& dcolors_only_rgb) {
 
-  Eigen::MatrixXd djointsleft;
-  Eigen::MatrixXd djointsright;
   compute_joints_positions(rig2world, 
     joints_left, joints_right, djointsleft, djointsright);
 
@@ -110,37 +133,19 @@ void process(
 
   //Project points from world coordinates to RGB
   Eigen::MatrixXd colors;
-  vector<int> has_rgb_indices;
+  Eigen::MatrixXi rgb_indices;
   project_on_pv(pointsWorld, pv2world, 
     focals.first, focals.second, intrinsics_ox, intrinsics_oy, 
-    intrinsics_width, intrinsics_height, rgbImage, colors, has_rgb_indices);
+    intrinsics_width, intrinsics_height, rgbImage, colors, rgb_indices);
 
-  /**********************
-  *** Libigl specific ***
-  ***********************/
   Eigen::MatrixXd V = pointsRig.cast<double>(); //Cast to double so that libigl is happy
-  
-  Eigen::MatrixXi rgb_indices(has_rgb_indices.size(), 1);
-  int fill_idx = 0;
-  for(int i : has_rgb_indices) {
-    rgb_indices(fill_idx++) = i;
-  }
-  Eigen::MatrixXd ddata_only_rgb;
-  Eigen::MatrixXd dcolors_only_rgb;
   igl::slice(V, rgb_indices, 1, ddata_only_rgb);
   igl::slice(colors, rgb_indices, 1, dcolors_only_rgb);
-
-  viewer.data().clear();
-  viewer.data().add_points(ddata_only_rgb, dcolors_only_rgb);
-  //TODO calling set_edges twices overrides the first one
-  viewer.data().set_edges(djointsleft, E, Eigen::RowVector3d(0, 0, 1));
-  viewer.data().set_edges(djointsright, E, Eigen::RowVector3d(1, 0, 0));
-  if(first_frame)
-    viewer.core().align_camera_center(ddata_only_rgb);
 }
 
 //Compute what to display on the next frame
 bool callback_pre_draw(Viewer& viewer) {
+  //Compute correct timestamps
   long depth_timestamp = timestamps[l];
 
   int pv_timestamp_idx = closest_timestamp_idx(depth_timestamp, pv_timestamps);
@@ -150,6 +155,10 @@ bool callback_pre_draw(Viewer& viewer) {
   long human_timestamp = human_timestamps[human_timestamp_idx];
 
   //TODO the rig2world_matrices[l] does not necessarily have the right timestamp..
+  Eigen::MatrixXd JointsLeft;
+  Eigen::MatrixXd JointsRight;
+  Eigen::MatrixXd Points;
+  Eigen::MatrixXd Colors;
   process(
     depth_images[l],
     rgb_images[pv_timestamp],
@@ -162,7 +171,18 @@ bool callback_pre_draw(Viewer& viewer) {
     focals[l],
     intrinsics_ox, intrinsics_oy,
     intrinsics_width, intrinsics_height,
-    is_first_frame);
+    JointsLeft,
+    JointsRight,
+    Points,
+    Colors);
+
+  viewer.data().clear();
+  viewer.data().add_points(Points, Colors);
+  //TODO calling set_edges twices overrides the first one
+  viewer.data().set_edges(JointsLeft, E, Eigen::RowVector3d(0, 0, 1));
+  viewer.data().set_edges(JointsRight, E, Eigen::RowVector3d(1, 0, 0));
+  if(is_first_frame)
+    viewer.core().align_camera_center(Points);
 
   ++l;
   l %= nb_frames;
@@ -251,7 +271,7 @@ bool valid_color(const RowVector3d& color) {
 
 void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv2world, 
   float focalx, float focaly, float principalx, float principaly, int pvWidth, int pvHeight,
-  const vector<vector<RowVector3d>>& rgbImage, Eigen::MatrixXd& colors, vector<int>& has_rgb_indices) {
+  const vector<vector<RowVector3d>>& rgbImage, Eigen::MatrixXd& colors, Eigen::MatrixXi& rgb_indices) {
 
   Eigen::MatrixXf Intrinsic(3, 3);
   Intrinsic << focalx, 0, principalx, 0, focaly, principaly, 0, 0, 1;
@@ -262,8 +282,10 @@ void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv
   Eigen::MatrixXf pointsPV = (world2pv * pointsWorld_h.transpose()).transpose().block(0, 0, pointsWorld_h.rows(), 3);
   
   Eigen::MatrixXf pointsPixel_h = (Intrinsic * pointsPV.transpose()).transpose(); //Retrieve homogeneous coordinates in pixel space
+
   //This assumes we have homogeneous coordinates in pointsPixel_h (points x 3), (x, y, w) format:
   colors.resize(pointsPixel_h.rows(), 3);
+  vector<int> has_rgb_indices;
   for(int i = 0; i < pointsPixel_h.rows(); i++) {
     float x_h = pointsPixel_h(i, 0);
     float y_h = pointsPixel_h(i, 1);
@@ -281,6 +303,12 @@ void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv
     } else {
       colors.row(i) = RowVector3d(0, 0, 0); //No color
     }
+  }
+
+  rgb_indices.resize(has_rgb_indices.size(), 1);
+  int fill_idx = 0;
+  for(int i : has_rgb_indices) {
+    rgb_indices(fill_idx++) = i;
   }
 }
 
@@ -387,7 +415,6 @@ void initialize() {
 }
 
 int main(int argc, char *argv[]) {
-  //folder = "../data/raw_ahat/";
   folder = "../data/greenbox/"; //Set data path here
 
   initialize();
