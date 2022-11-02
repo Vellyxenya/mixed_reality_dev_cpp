@@ -103,7 +103,7 @@ bool string_contains(string s, char c) {
   return s.find(c) != std::string::npos;
 }
 
-void visualize_pcds() {
+/*void visualize_pcds() {
   for (const auto & entry : fs::directory_iterator(folder)) {
     paths.push_back(entry.path());
   }
@@ -120,7 +120,7 @@ void visualize_pcds() {
 
   render_frame();
   viewer.core().align_camera_center(V_temp);
-}
+}*/
 
 inline void endian_swap(unsigned short int& x) {
     x = (x>>8) | (x<<8);
@@ -133,13 +133,13 @@ DepthData read_pgm(string pgm_file_path) {
 
   string inputLine = "";
 
-  getline(infile, inputLine);      // read the first line : P5
+  getline(infile, inputLine); // read the first line : P5
   if(inputLine.compare("P5") != 0) cerr << "Version error" << endl;
 
-  ss << infile.rdbuf();   //read the third line : width and height
+  ss << infile.rdbuf(); //read the third line : width and height
   ss >> num_of_cols >> num_of_rows;
 
-  int max_val;  //maximum intensity value : 255
+  int max_val; //maximum intensity value
   ss >> max_val;
   ss.ignore();
 
@@ -228,8 +228,6 @@ void depth_map_to_pc_px(Eigen::MatrixXf& D, const DepthData& depth_map,
     D.row(k) = image.row(i);
     k++;
   }
-  
-  //D = points_only;
 }
 
 void apply_transformation(const Eigen::MatrixXf& T, const Eigen::MatrixXf& points, Eigen::MatrixXf& out, int out_dim) {
@@ -351,6 +349,16 @@ Eigen::MatrixXf to_homogeneous(const Eigen::MatrixXf& points) {
   return P;
 }
 
+RowVector3d hand_color_1(181.0/255, 174.0/255, 150.0/255);
+RowVector3d hand_color_2(79.0/255, 71.0/255, 74.0/255);
+RowVector3d hand_color_3(107.0/255, 81.0/255, 43.0/255);
+bool valid_color(const RowVector3d& color) {
+  /*float tolerance = 0.6;
+  return (color - hand_color_1).squaredNorm() > tolerance || (color - hand_color_2).squaredNorm() > tolerance
+   || (color - hand_color_3).squaredNorm() > tolerance;*/
+  return color.y() > (color.x() + 0.01) && color.y() > (color.z() + 0.01);
+}
+
 void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv2world, 
   float focalx, float focaly, float principalx, float principaly, int pvWidth, int pvHeight,
   const vector<vector<RowVector3d>>& rgbImage, Eigen::MatrixXd& colors, vector<int>& has_rgb_indices) {
@@ -373,11 +381,15 @@ void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv
     int x = (int)(x_h / w);
     int y = (int)(y_h / w);
     if (x >= 0 && x < pvWidth && y >= 0 && y < pvHeight) {
-      colors.row(i) = rgbImage[y][pvWidth - x];
-      has_rgb_indices.push_back(i);
+      RowVector3d color = rgbImage[y][pvWidth - x];
+      if(valid_color(color)) {
+        colors.row(i) = color;
+        has_rgb_indices.push_back(i);
+      } else {
+        colors.row(i) = RowVector3d(0, 0, 0); //No color
+      }
     } else {
       colors.row(i) = RowVector3d(0, 0, 0); //No color
-      //TODO may want to mark these points as useless, i.e. discard them
     }
   }
 }
@@ -540,6 +552,7 @@ void visualize_raw_data() {
   Eigen::MatrixXd ddata_only_rgb;
   Eigen::MatrixXd dcolors_only_rgb;
 
+  int max_frames = 300;
   int kk = 0;
   for (auto path : paths) {
     cout << "path " << kk << endl;
@@ -568,13 +581,9 @@ void visualize_raw_data() {
     apply_transformation(cam2rig, D, pointsRig, 3);
 
     //Transform points from rig coordinates to world
-    // cout << "pointsRig: " << pointsRig.rows() << " " << pointsRig.cols() << endl;
-    // cout << "rig2world_matrices[kk]: " << rig2world_matrices[kk].rows() << " " << rig2world_matrices[kk].cols() << endl;
     apply_transformation(rig2world_matrices[kk], pointsRig, pointsWorld, 3);
 
     //Project points from world coordinates to RGB
-    //cout << "pointsWorld: " << pointsWorld.rows() << " " << pointsWorld.cols() << endl;
-    //cout << focals[kk].first << " " << focals[kk].second << " " << intrinsics_ox << " " << intrinsics_oy << endl;
     vector<int> has_rgb_indices;
     project_on_pv(pointsWorld, pv2world_matrices[pv_timestamp_idx], 
       focals[kk].first, focals[kk].second, intrinsics_ox, intrinsics_oy, 
@@ -596,11 +605,11 @@ void visualize_raw_data() {
     kk++;
 
     //Debugging
-    // if(kk == 50)
-    //    break;
+    if(kk == max_frames)
+      break;
   }
   //Debugging
-  //nb_frames = 50;
+  nb_frames = max_frames;
 
   viewer.data().clear();
   viewer.data().add_points(V, Eigen::RowVector3d(0, 0, 0));
@@ -665,6 +674,5 @@ int main(int argc, char *argv[]) {
   viewer.data().point_size = 2;
   Vector4f color(1, 1, 1, 1);
   viewer.core().background_color = color * 0.5f;
-  //viewer.core().background_color.setOnes();
   viewer.launch();
 }
