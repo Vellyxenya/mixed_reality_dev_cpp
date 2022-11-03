@@ -224,8 +224,8 @@ bool callback_pre_draw(Viewer& viewer) {
   viewer.data().set_edges(JointsLeft, E, Eigen::RowVector3d(0, 0, 1));
   viewer.data().set_edges(JointsRight, E, Eigen::RowVector3d(1, 0, 0));
 
-  int minimum_points = 50; //TODO probably increase this
-  int nb_warmup_frames = 30;
+  int minimum_points = 60; //TODO probably increase this
+  int nb_warmup_frames = 50;
   if(Points.rows() > minimum_points && l >= nb_warmup_frames) { //valid frame
     std::vector<Eigen::Vector3d> points_vec = eigen_to_vec(Points);
     if(is_first_frame) {
@@ -323,7 +323,7 @@ RowVector3d hand_color_1(181.0/255, 174.0/255, 150.0/255);
 RowVector3d hand_color_2(79.0/255, 71.0/255, 74.0/255);
 RowVector3d hand_color_3(107.0/255, 81.0/255, 43.0/255);
 bool valid_color(const RowVector3d& color) {
-  return color.squaredNorm() < 0.9 && color.squaredNorm() > 0.1;
+  return color.squaredNorm() < 0.9 && color.squaredNorm() > 0.01;
   //return color.y() > (color.x() + 0.01) && color.y() > (color.z() + 0.01);
 }
 

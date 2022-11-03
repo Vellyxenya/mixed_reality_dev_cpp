@@ -168,7 +168,8 @@ void read_pv_meta(std::string folder, std::vector<Eigen::MatrixXf>& pv2world_mat
   }
 }
 
-void read_human_data(std::string folder, vector<long>& timestamps, vector<vector<Eigen::MatrixXf>>& list_joints_left,
+void read_human_data(std::string folder, vector<long>& timestamps, 
+  vector<vector<Eigen::MatrixXf>>& list_joints_left,
   vector<vector<Eigen::MatrixXf>>& list_joints_right,
   vector<Eigen::VectorXf>& list_gaze_origins,
   vector<Eigen::VectorXf>& list_gaze_directions,
@@ -186,7 +187,7 @@ void read_human_data(std::string folder, vector<long>& timestamps, vector<vector
 
     //Read timestamp
     getline(line, next_val, ',');
-    timestamps.push_back(stol(next_val));
+    long timestamp = stol(next_val);
 
     //Read head data
     Eigen::MatrixXf Head(4, 4);
@@ -212,7 +213,6 @@ void read_human_data(std::string folder, vector<long>& timestamps, vector<vector
       }
       joints_left.push_back(Joint);
     }
-    list_joints_left.push_back(joints_left);
 
     //Read right hand data
     getline(line, next_val, ',');
@@ -228,7 +228,13 @@ void read_human_data(std::string folder, vector<long>& timestamps, vector<vector
       }
       joints_right.push_back(Joint);
     }
-    list_joints_right.push_back(joints_right);
+
+    //Only push timestamp if both left and right hand data are available
+    if(left_hand_available && right_hand_available) {
+      timestamps.push_back(timestamp);
+      list_joints_left.push_back(joints_left);
+      list_joints_right.push_back(joints_right);
+    }
 
     //Read gaze data
     getline(line, next_val, ',');
