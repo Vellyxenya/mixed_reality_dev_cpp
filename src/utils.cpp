@@ -1,5 +1,6 @@
 #include <filesystem>
 #include "utils.h"
+#include <iostream>
 
 bool string_contains(const std::string s, const char c) {
   return s.find(c) != std::string::npos;
@@ -24,7 +25,7 @@ std::string find_file_ending_with(const std::string& folder, const std::string& 
 }
 
 std::vector<Eigen::Vector3d> eigen_to_vec(const Eigen::MatrixXd& mat) {
-  std::vector<Eigen::Vector3d> vec(mat.rows());
+  std::vector<Eigen::Vector3d> vec;
   for(int i = 0; i < mat.rows(); i++) {
     vec.push_back(mat.row(i));
   }

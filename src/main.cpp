@@ -188,77 +188,91 @@ void process(
   igl::slice(colors, rgb_indices, 1, dcolors_only_rgb);
 }
 
+bool gathering_data = true;
+std::vector<Eigen::MatrixXd> list_cumulative_pcds;
 //Compute what to display on the next frame
 bool callback_pre_draw(Viewer& viewer) {
-  if (l == nb_frames)
-    return false;
-  //Compute correct timestamps
-  long depth_timestamp = timestamps[l];
+  if(gathering_data) {
+    if (l == nb_frames)
+      return false;
+    //Compute correct timestamps
+    long depth_timestamp = timestamps[l];
 
-  int pv_timestamp_idx = closest_timestamp_idx(depth_timestamp, pv_timestamps);
-  long pv_timestamp = pv_timestamps[pv_timestamp_idx];
+    int pv_timestamp_idx = closest_timestamp_idx(depth_timestamp, pv_timestamps);
+    long pv_timestamp = pv_timestamps[pv_timestamp_idx];
 
-  int human_timestamp_idx = closest_timestamp_idx(depth_timestamp, human_timestamps);
-  long human_timestamp = human_timestamps[human_timestamp_idx];
+    int human_timestamp_idx = closest_timestamp_idx(depth_timestamp, human_timestamps);
+    long human_timestamp = human_timestamps[human_timestamp_idx];
 
-  //TODO the rig2world_matrices[l] does not necessarily have the right timestamp..
-  Eigen::MatrixXd JointsLeft;
-  Eigen::MatrixXd JointsRight;
-  Eigen::MatrixXd Points;
-  Eigen::MatrixXd Colors;
-  process(
-    depth_images[l],
-    rgb_images[pv_timestamp],
-    rig2world_matrices[l],
-    pv2world_matrices[pv_timestamp_idx],
-    cam2rig,
-    list_joints_left[human_timestamp_idx],
-    list_joints_right[human_timestamp_idx],
-    lut,
-    focals[l],
-    intrinsics_ox, intrinsics_oy,
-    intrinsics_width, intrinsics_height,
-    JointsLeft,
-    JointsRight,
-    Points,
-    Colors);
-
-  viewer.data().clear();
-  viewer.data().add_points(Points, Colors);
-  //TODO calling set_edges twices overrides the first one
-  viewer.data().set_edges(JointsLeft, E, Eigen::RowVector3d(0, 0, 1));
-  viewer.data().set_edges(JointsRight, E, Eigen::RowVector3d(1, 0, 0));
-
-  int minimum_points = 60; //TODO probably increase this
-  int nb_warmup_frames = 50;
-  if(Points.rows() > minimum_points && l >= nb_warmup_frames) { //valid frame
-    PCD points_vec = eigen_to_vec(Points);
-    point_clouds.push_back(points_vec);
-    if(is_first_frame) {
-      viewer.core().align_camera_center(Points);
-      is_first_frame = false;
-    } else {
-      //TODO For now the processing is done offline but should be moved here at some point
-
-      /*Eigen::Matrix<double, 6, 6> InfoMat;
-      Eigen::Matrix4d T = get_transformation(points_vec, prev_points_vec, InfoMat);
-      transformations.push_back(T);*/
-    }
-    prev_points_vec = points_vec;
-  }
-    
-  ++l;
-  cout << "Frame " << l << endl;
-
-  if(l == nb_frames) {
-    //l %= nb_frames; looping behavior
-    /*for(int i = 0; i < transformations.size(); i++) {
-      cout << transformations[i] << endl;
-    }*/
-    Eigen::MatrixXd final_point_cloud = merge_point_clouds(point_clouds);
+    //TODO the rig2world_matrices[l] does not necessarily have the right timestamp..
+    Eigen::MatrixXd JointsLeft;
+    Eigen::MatrixXd JointsRight;
+    Eigen::MatrixXd Points;
+    Eigen::MatrixXd Colors;
+    process(
+      depth_images[l],
+      rgb_images[pv_timestamp],
+      rig2world_matrices[l],
+      pv2world_matrices[pv_timestamp_idx],
+      cam2rig,
+      list_joints_left[human_timestamp_idx],
+      list_joints_right[human_timestamp_idx],
+      lut,
+      focals[l],
+      intrinsics_ox, intrinsics_oy,
+      intrinsics_width, intrinsics_height,
+      JointsLeft,
+      JointsRight,
+      Points,
+      Colors);
 
     viewer.data().clear();
-    viewer.data().add_points(final_point_cloud, Eigen::RowVector3d(0, 0, 1));
+    viewer.data().add_points(Points, Colors);
+    //TODO calling set_edges twices overrides the first one
+    viewer.data().set_edges(JointsLeft, E, Eigen::RowVector3d(0, 0, 1));
+    viewer.data().set_edges(JointsRight, E, Eigen::RowVector3d(1, 0, 0));
+
+    int minimum_points = 120; //TODO probably increase this
+    int nb_warmup_frames = 100;
+    if(Points.rows() > minimum_points && l >= nb_warmup_frames) { //valid frame
+      // cout << "min: " << Points.colwise().minCoeff() << endl;
+      // cout << "max: " << Points.colwise().maxCoeff() << endl;
+      PCD points_vec = eigen_to_vec(Points);
+      point_clouds.push_back(points_vec);
+      if(is_first_frame) {
+        viewer.core().align_camera_center(Points);
+        is_first_frame = false;
+      } else {
+        //TODO For now the processing is done offline but should be moved here at some point
+
+        /*Eigen::Matrix<double, 6, 6> InfoMat;
+        Eigen::Matrix4d T = get_transformation(points_vec, prev_points_vec, InfoMat);
+        transformations.push_back(T);*/
+      }
+      prev_points_vec = points_vec;
+    }
+      
+    ++l;
+    cout << "Frame " << l << endl;
+
+    //Visualize merged point cloud
+    if(l == nb_frames) {
+      Eigen::MatrixXd final_point_cloud = merge_point_clouds(point_clouds, list_cumulative_pcds);
+      viewer.data().clear();
+      viewer.data().add_points(final_point_cloud, Eigen::RowVector3d(0, 0, 1));
+      gathering_data = false;
+      l = 0;
+    }
+  } else {
+    if(list_cumulative_pcds.size() <= 0) {
+      cout << "Trying to visualize cumulative point cloud but no point cloud is available" << endl;
+      return false;
+    }
+    viewer.data().clear();
+    viewer.data().add_points(list_cumulative_pcds[l], Eigen::RowVector3d(0, 0, 1));
+    l++;
+    if(l >= list_cumulative_pcds.size())
+      l = 0;
   }
     
   return false;
@@ -332,12 +346,14 @@ void apply_transformation(const Eigen::MatrixXf& T, const Eigen::MatrixXf& point
   out = (out_dim == 3) ? temp.block(0, 0, temp.rows(), 3) : temp;
 }
 
-RowVector3d hand_color_1(181.0/255, 174.0/255, 150.0/255);
-RowVector3d hand_color_2(79.0/255, 71.0/255, 74.0/255);
-RowVector3d hand_color_3(107.0/255, 81.0/255, 43.0/255);
+// RowVector3d hand_color_1(181.0/255, 174.0/255, 150.0/255);
+// RowVector3d hand_color_2(79.0/255, 71.0/255, 74.0/255);
+// RowVector3d hand_color_3(107.0/255, 81.0/255, 43.0/255);
 bool valid_color(const RowVector3d& color) {
-  return color.squaredNorm() < 0.9 && color.squaredNorm() > 0.01;
-  //return color.y() > (color.x() + 0.01) && color.y() > (color.z() + 0.01);
+  bool not_too_white = color.squaredNorm() < 0.9;
+  bool not_too_black = color.squaredNorm() > 0.01;
+  bool satisfies_custom_constraints = true; //color.y() > (color.x() + 0.01) && color.y() > (color.z() + 0.01);
+  return not_too_white && not_too_black && satisfies_custom_constraints;
 }
 
 void project_on_pv(const Eigen::MatrixXf& pointsWorld, const Eigen::MatrixXf& pv2world, 
@@ -439,7 +455,7 @@ void read_data() {
   }
   cout << endl;
 
-  size_t max_frames = 300;
+  size_t max_frames = 200;
   nb_frames = min(max_frames, depth_images.size());
 
   viewer.data().clear();
@@ -486,7 +502,12 @@ void initialize() {
 }
 
 int main(int argc, char *argv[]) {
-  folder = "../data/brownbag/"; //Set data path here
+  if(argc < 2) {
+    std::cout << "You must specify a folder name inside ../data/" << std::endl;
+    std::cout << "e.g. you can run ./clouds greenbox" << std::endl;
+  }
+  string sub_folder = argv[1];
+  folder = "../data/" + sub_folder + "/"; //Set data path here
 
   initialize();
 
