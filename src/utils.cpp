@@ -30,3 +30,11 @@ std::vector<Eigen::Vector3d> eigen_to_vec(const Eigen::MatrixXd& mat) {
   }
   return vec;
 }
+
+Eigen::MatrixXd vec_to_eigen(const std::vector<Eigen::Vector3d>& vec) {
+  Eigen::MatrixXd Mat(vec.size(), 3);
+  for(int i = 0; i < vec.size(); i++) {
+    Mat.row(i) = vec[i];
+  }
+  return Mat;
+}

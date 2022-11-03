@@ -70,6 +70,9 @@ float min_dist_to_joints = 0.01;
 vector<Eigen::Vector3d> prev_points_vec;
 vector<Eigen::Matrix4d> transformations;
 
+//All point clouds
+vector<PCD> point_clouds;
+
 Eigen::MatrixXf to_homogeneous(const Eigen::MatrixXf& points);
 bool callback_pre_draw(Viewer& viewer);
 bool valid_color(const RowVector3d& color);
@@ -187,6 +190,8 @@ void process(
 
 //Compute what to display on the next frame
 bool callback_pre_draw(Viewer& viewer) {
+  if (l == nb_frames)
+    return false;
   //Compute correct timestamps
   long depth_timestamp = timestamps[l];
 
@@ -227,27 +232,35 @@ bool callback_pre_draw(Viewer& viewer) {
   int minimum_points = 60; //TODO probably increase this
   int nb_warmup_frames = 50;
   if(Points.rows() > minimum_points && l >= nb_warmup_frames) { //valid frame
-    std::vector<Eigen::Vector3d> points_vec = eigen_to_vec(Points);
+    PCD points_vec = eigen_to_vec(Points);
+    point_clouds.push_back(points_vec);
     if(is_first_frame) {
       viewer.core().align_camera_center(Points);
       is_first_frame = false;
     } else {
-      Eigen::Matrix4d T = get_transformation(points_vec, prev_points_vec);
-      transformations.push_back(T);
+      //TODO For now the processing is done offline but should be moved here at some point
+
+      /*Eigen::Matrix<double, 6, 6> InfoMat;
+      Eigen::Matrix4d T = get_transformation(points_vec, prev_points_vec, InfoMat);
+      transformations.push_back(T);*/
     }
     prev_points_vec = points_vec;
   }
     
   ++l;
   cout << "Frame " << l << endl;
+
   if(l == nb_frames) {
     //l %= nb_frames; looping behavior
-    for(int i = 0; i < transformations.size(); i++) {
+    /*for(int i = 0; i < transformations.size(); i++) {
       cout << transformations[i] << endl;
-    }
-    exit(0);
-  }
+    }*/
+    Eigen::MatrixXd final_point_cloud = merge_point_clouds(point_clouds);
 
+    viewer.data().clear();
+    viewer.data().add_points(final_point_cloud, Eigen::RowVector3d(0, 0, 1));
+  }
+    
   return false;
 }
 

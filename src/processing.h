@@ -1,7 +1,12 @@
 #ifndef PROCESSING_H
 #define PROCESSING_H
 
-Eigen::Matrix4d get_transformation(const std::vector<Eigen::Vector3d>& source_vec,
-    const std::vector<Eigen::Vector3d>& target_vec);
+typedef std::vector<Eigen::Vector3d> PCD;
+
+Eigen::Matrix4d get_transformation(const PCD& source_pcd,
+    const PCD& target_pcd, Eigen::Matrix<double, 6, 6>& InfoMat);
+
+Eigen::MatrixXd merge_point_clouds(std::vector<PCD>& pcds_vec);
+
 
 #endif
