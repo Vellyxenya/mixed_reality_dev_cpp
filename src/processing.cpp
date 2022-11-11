@@ -2,6 +2,8 @@
 #include "processing.h"
 #include "utils.h"
 #include <iostream>
+#include <tuple>
+#include <igl/slice.h>
 
 using namespace open3d;
 
@@ -92,14 +94,14 @@ void run_global_optimization(std::vector<geometry::PointCloud>& partial_pcds, Ei
             Eigen::Matrix4d T = get_transformation_(partial_pcds[src_id], partial_pcds[tgt_id], InfoMat);
             bool uncertain = true;
             pose_graph.edges_.push_back(
-                pipelines::registration::PoseGraphEdge(src_id, tgt_id, T, InfoMat, uncertain, 0.7));
+                pipelines::registration::PoseGraphEdge(src_id, tgt_id, T, InfoMat, uncertain, 0.8));
         }
     }
     //Setup optimization parameters
     pipelines::registration::GlobalOptimizationLevenbergMarquardt optimization_method;
     pipelines::registration::GlobalOptimizationConvergenceCriteria criteria; //TODO probably need to tweak
     double edge_prune_threshold = 0.025;
-    double preference_loop_closure = 6;
+    double preference_loop_closure = 8;
     int reference_node = 0;
     auto option = pipelines::registration::GlobalOptimizationOption(
         max_correspondance_dist, edge_prune_threshold, preference_loop_closure, reference_node);
@@ -120,6 +122,29 @@ void run_global_optimization(std::vector<geometry::PointCloud>& partial_pcds, Ei
     cout << "Combined " << pcd_combined.points_.size() << endl;
     std::shared_ptr<geometry::PointCloud> pcd_combined_down = pcd_combined.VoxelDownSample(0.005);
     ThePointCloud = vec_to_eigen(pcd_combined_down->points_);
+}
+
+void filter_and_save_partial_pcd(const geometry::PointCloud& pcd_combined, 
+    const Eigen::Matrix4d& odometry, std::vector<Eigen::MatrixXd>& partial_pcds, 
+    std::vector<Eigen::Matrix4d>& partial_odometries) {
+
+    std::shared_ptr<open3d::geometry::PointCloud> pc;
+    std::vector<size_t> indices;
+    bool statistical_removal = false;
+    if(statistical_removal) {
+        std::tie(pc, indices) = pcd_combined.RemoveStatisticalOutliers(50, 1);
+    } else {
+        std::tie(pc, indices) = pcd_combined.RemoveRadiusOutliers(20, 0.01);
+    }
+    Eigen::MatrixXd Points = vec_to_eigen(pcd_combined.points_);
+    Eigen::MatrixXd FilteredPoints(indices.size(), 3);
+    cout << FilteredPoints.rows() << "/" << Points.rows() << endl;
+    int k = 0;
+    for(int i = 0; i < indices.size(); i++) {
+        FilteredPoints.row(k++) = Points.row(indices[i]);
+    }
+    partial_pcds.push_back(FilteredPoints);
+    partial_odometries.push_back(odometry);
 }
 
 Eigen::MatrixXd merge_point_clouds(std::vector<PCD>& pcds_vec, 
@@ -154,8 +179,7 @@ Eigen::MatrixXd merge_point_clouds(std::vector<PCD>& pcds_vec,
             pcd_combined = pcds[src_id];
             std::cout << nb_children_pcds << std::endl;
             if(nb_children_pcds >= minimum_children) {
-                partial_pcds.push_back(vec_to_eigen(pcd_combined.points_));
-                partial_odometries.push_back(odometry);
+                filter_and_save_partial_pcd(pcd_combined, odometry, partial_pcds, partial_odometries);
             }
             nb_children_pcds = 1;
             continue;
@@ -168,7 +192,7 @@ Eigen::MatrixXd merge_point_clouds(std::vector<PCD>& pcds_vec,
         nb_children_pcds++;
     }
     if(nb_children_pcds >= minimum_children) {
-        partial_pcds.push_back(vec_to_eigen(pcd_combined.points_));
+        filter_and_save_partial_pcd(pcd_combined, odometry, partial_pcds, partial_odometries);
     }
 
     //TODO: Clean every point cloud

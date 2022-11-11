@@ -287,7 +287,7 @@ bool callback_pre_draw(Viewer& viewer) {
           visualized_partial = 0;
         bool last_partial = visualized_partial == partial_pcds.size() - 1;
         viewer.data().clear();
-        viewer.data().add_points(partial_pcds[partial_pcds.size()-1], last_partial ? Eigen::RowVector3d(0, 0.5, 0) : Eigen::RowVector3d(0.5, 0, 0));
+        viewer.data().add_points(partial_pcds[visualized_partial], last_partial ? Eigen::RowVector3d(0, 0.5, 0) : Eigen::RowVector3d(0.5, 0, 0));
       }
     } else {
       if(list_cumulative_pcds.size() <= 0) {
