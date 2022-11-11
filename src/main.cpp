@@ -67,7 +67,7 @@ bool is_first_frame = true;
 float min_dist_to_joints = 0.007;
 
 //Params
-bool visualize_partials = false;
+bool visualize_partials = true;
 
 //Temp data
 vector<Eigen::Vector3d> prev_points_vec;
@@ -280,13 +280,14 @@ bool callback_pre_draw(Viewer& viewer) {
         return false;
       }
       l++;
-      if(l >= 30) {
+      if(l >= 90) {
         l = 0;
         visualized_partial++;
         if(visualized_partial >= partial_pcds.size())
           visualized_partial = 0;
+        bool last_partial = visualized_partial == partial_pcds.size() - 1;
         viewer.data().clear();
-        viewer.data().add_points(partial_pcds[visualized_partial], Eigen::RowVector3d(0.5, 0, 0));
+        viewer.data().add_points(partial_pcds[partial_pcds.size()-1], last_partial ? Eigen::RowVector3d(0, 0.5, 0) : Eigen::RowVector3d(0.5, 0, 0));
       }
     } else {
       if(list_cumulative_pcds.size() <= 0) {
@@ -485,7 +486,7 @@ void read_data() {
   }
   cout << endl;
 
-  size_t max_frames = 200;
+  size_t max_frames = 400;
   nb_frames = min(max_frames, depth_images.size());
 
   viewer.data().clear();
