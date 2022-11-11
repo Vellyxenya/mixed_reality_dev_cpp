@@ -8,3 +8,4 @@ debug
 .vscode/
 data/
 *.zip
+*.ply

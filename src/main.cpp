@@ -66,15 +66,15 @@ int nb_frames;
 bool is_first_frame = true;
 float min_dist_to_joints = 0.007;
 
-//Params
-bool visualize_partials = true;
-
 //Temp data
 vector<Eigen::Vector3d> prev_points_vec;
 vector<Eigen::Matrix4d> transformations;
 
 //All point clouds, and corresponding colors
 vector<PCD> point_clouds, color_clouds;
+
+enum DisplayMode { CUMULATIVE_PCDS, PARTIAL_PCDS, FINAL_PCD, MESH };
+DisplayMode display_mode = PARTIAL_PCDS;
 
 Eigen::MatrixXf to_homogeneous(const Eigen::MatrixXf& points);
 bool callback_pre_draw(Viewer& viewer);
@@ -274,7 +274,7 @@ bool callback_pre_draw(Viewer& viewer) {
       l = 0;
     }
   } else {
-    if(visualize_partials) {
+    if(display_mode == PARTIAL_PCDS) {
       if(partial_pcds.size() <= 0) {
         cout << "No partial pcds found" << endl;
         return false;
@@ -283,13 +283,22 @@ bool callback_pre_draw(Viewer& viewer) {
       if(l >= 90) {
         l = 0;
         visualized_partial++;
-        if(visualized_partial >= partial_pcds.size())
+        if(visualized_partial >= partial_pcds.size() - 1)
           visualized_partial = 0;
-        bool last_partial = visualized_partial == partial_pcds.size() - 1;
         viewer.data().clear();
-        viewer.data().add_points(partial_pcds[visualized_partial], last_partial ? Eigen::RowVector3d(0, 0.5, 0) : Eigen::RowVector3d(0.5, 0, 0));
+        viewer.data().add_points(partial_pcds[visualized_partial], Eigen::RowVector3d(0.5, 0, 0));
       }
-    } else {
+    } else if(display_mode == FINAL_PCD) {
+      if(partial_pcds.size() <= 0) {
+        cout << "No partial pcds found" << endl;
+        return false;
+      }
+      if(l == 1) {
+        viewer.data().clear();
+        viewer.data().add_points(partial_pcds[partial_pcds.size() - 1], Eigen::RowVector3d(0, 0.5, 0));
+      }
+      l++;
+    } else if(display_mode == CUMULATIVE_PCDS) {
       if(list_cumulative_pcds.size() <= 0) {
         cout << "Trying to visualize cumulative point cloud but no point cloud is available" << endl;
         return false;
@@ -299,6 +308,8 @@ bool callback_pre_draw(Viewer& viewer) {
       l++;
       if(l >= list_cumulative_pcds.size())
         l = 0;
+    } else if(display_mode == MESH) {
+      //TODO display mesh
     }
   }
     
@@ -550,10 +561,9 @@ int main(int argc, char *argv[]) {
 
   menu.callback_draw_viewer_menu = [&]() {
     menu.draw_viewer_menu();
-
     if (ImGui::CollapsingHeader("Skeletal Animation", ImGuiTreeNodeFlags_DefaultOpen)) {
-      if(ImGui::Checkbox("visualize_partials", &visualize_partials)) {
-        
+      if(ImGui::Combo("Display mode", (int*)(&display_mode), "CUMULATIVE_PCDS\0PARTIAL_PCDS\0FINAL_PCD\0MESH\0\0")) {
+        l = 0;
       }
     }
   };

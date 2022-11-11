@@ -10,11 +10,10 @@ using namespace open3d;
 using std::cout;
 using std::endl;
 
-double max_correspondance_dist = 0.01;
 int minimum_children = 10;
 
 Eigen::Matrix4d get_transformation_(const geometry::PointCloud& source,
-    const geometry::PointCloud& target, Eigen::Matrix6d& InfoMat) {
+    const geometry::PointCloud& target, Eigen::Matrix6d& InfoMat, const float max_correspondance_dist) {
 
     int nb_iterations = 300;
 
@@ -74,15 +73,16 @@ Eigen::Matrix4d get_transformation_(const geometry::PointCloud& source,
 // }
 
 Eigen::Matrix4d get_transformation(const PCD& source_pcd,
-    const PCD& target_pcd, Eigen::Matrix6d& InfoMat) {
+    const PCD& target_pcd, Eigen::Matrix6d& InfoMat, float max_correspondance_dist) {
 
     const geometry::PointCloud source = geometry::PointCloud(source_pcd);
     const geometry::PointCloud target = geometry::PointCloud(target_pcd);
 
-    return get_transformation_(source, target, InfoMat);
+    return get_transformation_(source, target, InfoMat, max_correspondance_dist);
 }
 
 void run_global_optimization(std::vector<geometry::PointCloud>& partial_pcds, Eigen::MatrixXd& ThePointCloud) {
+    float global_opti_max_correspondance_dist = 0.01;
     //Setup the pose graph
     pipelines::registration::PoseGraph pose_graph;
     for(int src_id = 0; src_id < partial_pcds.size(); src_id++) {
@@ -91,7 +91,7 @@ void run_global_optimization(std::vector<geometry::PointCloud>& partial_pcds, Ei
             pipelines::registration::PoseGraphNode(Eigen::Matrix4d::Identity()));
         for(int tgt_id = src_id + 1; tgt_id < partial_pcds.size(); tgt_id++) {
             Eigen::Matrix6d InfoMat;
-            Eigen::Matrix4d T = get_transformation_(partial_pcds[src_id], partial_pcds[tgt_id], InfoMat);
+            Eigen::Matrix4d T = get_transformation_(partial_pcds[src_id], partial_pcds[tgt_id], InfoMat, global_opti_max_correspondance_dist);
             bool uncertain = true;
             pose_graph.edges_.push_back(
                 pipelines::registration::PoseGraphEdge(src_id, tgt_id, T, InfoMat, uncertain, 0.8));
@@ -100,11 +100,11 @@ void run_global_optimization(std::vector<geometry::PointCloud>& partial_pcds, Ei
     //Setup optimization parameters
     pipelines::registration::GlobalOptimizationLevenbergMarquardt optimization_method;
     pipelines::registration::GlobalOptimizationConvergenceCriteria criteria; //TODO probably need to tweak
-    double edge_prune_threshold = 0.025;
+    double edge_prune_threshold = 0.25;
     double preference_loop_closure = 8;
     int reference_node = 0;
     auto option = pipelines::registration::GlobalOptimizationOption(
-        max_correspondance_dist, edge_prune_threshold, preference_loop_closure, reference_node);
+        global_opti_max_correspondance_dist, edge_prune_threshold, preference_loop_closure, reference_node);
 
     //Run global optimization
     std::cout << "Running Global optimization..." << std::endl;
@@ -161,10 +161,11 @@ Eigen::MatrixXd merge_point_clouds(std::vector<PCD>& pcds_vec,
     std::vector<PCD>& colors_vec, 
     std::vector<Eigen::MatrixXd>& list_cumulative_pcds,
     std::vector<Eigen::MatrixXd>& partial_pcds) {
+
+    double max_correspondance_dist = 0.01;
     Eigen::Matrix4d odometry = Eigen::Matrix4d::Identity();
     geometry::PointCloud pcd_combined;
     std::vector<Eigen::Matrix4d> odometries;
-    
     odometries.push_back(odometry);
 
     std::vector<geometry::PointCloud> pcds;
@@ -179,7 +180,7 @@ Eigen::MatrixXd merge_point_clouds(std::vector<PCD>& pcds_vec,
     int nb_children_pcds = 1;
     for(int src_id = 0; src_id < pcds.size()-1; src_id++) {
         Eigen::Matrix6d InfoMat;
-        Eigen::Matrix4d T = get_transformation_(pcds[src_id], pcds[src_id+1], InfoMat);
+        Eigen::Matrix4d T = get_transformation_(pcds[src_id], pcds[src_id+1], InfoMat, max_correspondance_dist);
         Eigen::Matrix4d new_odometry = T * odometry;
         double norm = (new_odometry - odometry).squaredNorm();
         odometry = new_odometry;
