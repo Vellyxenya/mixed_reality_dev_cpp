@@ -130,7 +130,7 @@ void filter_and_save_partial_pcd(const geometry::PointCloud& pcd_combined,
 
     std::shared_ptr<open3d::geometry::PointCloud> pc;
     std::vector<size_t> indices;
-    bool statistical_removal = false;
+    bool statistical_removal = true;
     if(statistical_removal) {
         std::tie(pc, indices) = pcd_combined.RemoveStatisticalOutliers(50, 1);
     } else {
@@ -145,6 +145,16 @@ void filter_and_save_partial_pcd(const geometry::PointCloud& pcd_combined,
     }
     partial_pcds.push_back(FilteredPoints);
     partial_odometries.push_back(odometry);
+}
+
+std::shared_ptr<geometry::TriangleMesh> poisson_reconstruction(geometry::PointCloud& point_cloud) {
+    std::shared_ptr<open3d::geometry::TriangleMesh> mesh;
+    std::vector<double> densities;
+    point_cloud.EstimateNormals();
+    float scale = 3;
+    std::tie(mesh, densities) = geometry::TriangleMesh::CreateFromPointCloudPoisson(point_cloud, 8UL, 0, scale);
+    io::WriteTriangleMesh("../out/FinalMesh.ply", *mesh);
+    return mesh;
 }
 
 Eigen::MatrixXd merge_point_clouds(std::vector<PCD>& pcds_vec, 
@@ -215,6 +225,11 @@ Eigen::MatrixXd merge_point_clouds(std::vector<PCD>& pcds_vec,
     Eigen::MatrixXd ThePointCloud;
     run_global_optimization(transformed_pcds, ThePointCloud);
     partial_pcds.push_back(ThePointCloud);
+
+    auto ThePointCloud_o3d = geometry::PointCloud((eigen_to_vec(ThePointCloud)));
+    auto mesh = poisson_reconstruction(ThePointCloud_o3d);
+    // mesh->vertices_;
+    // mesh->triangles;
 
     return list_cumulative_pcds[list_cumulative_pcds.size()-1];
 }
