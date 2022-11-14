@@ -16,6 +16,8 @@
 #include <math.h>
 #include <map>
 
+//#include "mediapipe/framework/port/logging.h"
+
 #include "utils.h"
 #include "loading.h"
 #include "processing.h"
@@ -72,9 +74,17 @@ vector<Eigen::Matrix4d> transformations;
 
 //All point clouds, and corresponding colors
 vector<PCD> point_clouds, color_clouds;
+Eigen::MatrixXd ThePointCloud;
 
-enum DisplayMode { CUMULATIVE_PCDS, PARTIAL_PCDS, FINAL_PCD, MESH };
-DisplayMode display_mode = PARTIAL_PCDS;
+enum DisplayMode { CUMULATIVE_PCDS, PARTIAL_PCDS, FINAL_PCD_BEFORE, FINAL_PCD_AFTER, MESH };
+DisplayMode display_mode = FINAL_PCD_AFTER;
+
+//Global optimization params
+float global_opti_max_correspondance_dist = 0.01;
+float edge_certainty = 0.8;
+double edge_prune_threshold = 0.1;
+double preference_loop_closure = 8;
+double feature_voxel_size = 0.01;
 
 Eigen::MatrixXf to_homogeneous(const Eigen::MatrixXf& points);
 bool callback_pre_draw(Viewer& viewer);
@@ -194,6 +204,16 @@ void process(
   igl::slice(colors, rgb_indices, 1, dcolors_only_rgb);
 }
 
+bool callback_key_down(Viewer &viewer, unsigned char key, int modifiers) {
+  if (key == '1') {
+    //Update ThePointCloud
+    rerun_global_optimization(ThePointCloud, global_opti_max_correspondance_dist,
+      edge_certainty, edge_prune_threshold, preference_loop_closure, feature_voxel_size);
+    l = 0; //So that display update is triggered again
+  }
+  return false;
+}
+
 int visualized_partial = 0;
 bool gathering_data = true;
 std::vector<Eigen::MatrixXd> list_cumulative_pcds;
@@ -267,7 +287,9 @@ bool callback_pre_draw(Viewer& viewer) {
 
     //Visualize merged point cloud
     if(l == nb_frames) {
-      Eigen::MatrixXd final_point_cloud = merge_point_clouds(point_clouds, color_clouds, list_cumulative_pcds, partial_pcds);
+      Eigen::MatrixXd final_point_cloud = merge_point_clouds(point_clouds, color_clouds, list_cumulative_pcds, partial_pcds, ThePointCloud,
+        global_opti_max_correspondance_dist, edge_certainty, 
+        edge_prune_threshold, preference_loop_closure, feature_voxel_size);
       viewer.data().clear();
       viewer.data().add_points(final_point_cloud, Eigen::RowVector3d(0, 0, 1));
       gathering_data = false;
@@ -288,7 +310,7 @@ bool callback_pre_draw(Viewer& viewer) {
         viewer.data().clear();
         viewer.data().add_points(partial_pcds[visualized_partial], Eigen::RowVector3d(0.5, 0, 0));
       }
-    } else if(display_mode == FINAL_PCD) {
+    } else if(display_mode == FINAL_PCD_BEFORE) {
       if(partial_pcds.size() <= 0) {
         cout << "No partial pcds found" << endl;
         return false;
@@ -296,6 +318,12 @@ bool callback_pre_draw(Viewer& viewer) {
       if(l == 1) {
         viewer.data().clear();
         viewer.data().add_points(partial_pcds[partial_pcds.size() - 1], Eigen::RowVector3d(0, 0.5, 0));
+      }
+      l++;
+    } else if(display_mode == FINAL_PCD_AFTER) {
+      if(l == 1) {
+        viewer.data().clear();
+        viewer.data().add_points(ThePointCloud, Eigen::RowVector3d(0, 0.4, 0));
       }
       l++;
     } else if(display_mode == CUMULATIVE_PCDS) {
@@ -497,7 +525,7 @@ void read_data() {
   }
   cout << endl;
 
-  size_t max_frames = 400;
+  size_t max_frames = 500;
   nb_frames = min(max_frames, depth_images.size());
 
   viewer.data().clear();
@@ -561,13 +589,21 @@ int main(int argc, char *argv[]) {
 
   menu.callback_draw_viewer_menu = [&]() {
     menu.draw_viewer_menu();
-    if (ImGui::CollapsingHeader("Skeletal Animation", ImGuiTreeNodeFlags_DefaultOpen)) {
-      if(ImGui::Combo("Display mode", (int*)(&display_mode), "CUMULATIVE_PCDS\0PARTIAL_PCDS\0FINAL_PCD\0MESH\0\0")) {
+    if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen)) {
+      if(ImGui::Combo("Display mode", (int*)(&display_mode), "CUMULATIVE_PCDS\0PARTIAL_PCDS\0FINAL_PCD_BEFORE\0FINAL_PCD_AFTER\0MESH\0\0")) {
         l = 0;
       }
     }
+    if (ImGui::CollapsingHeader("Global Optimization parameters", ImGuiTreeNodeFlags_DefaultOpen)) {
+      ImGui::InputFloat("Max Correspondance", &global_opti_max_correspondance_dist);
+      ImGui::InputFloat("Edge certainty", &edge_certainty);
+      ImGui::InputDouble("Edge prune threshold", &edge_prune_threshold);
+      ImGui::InputDouble("Loop closure pref", &preference_loop_closure);
+      ImGui::InputDouble("Feature voxel size", &feature_voxel_size);
+    }
   };
 
+  viewer.callback_key_down = callback_key_down;
   viewer.callback_pre_draw = callback_pre_draw;
   viewer.core().set_rotation_type(igl::opengl::ViewerCore::ROTATION_TYPE_TRACKBALL);
   viewer.data().point_size = 2;
