@@ -22,4 +22,10 @@ add_executable(${PROJECT_NAME} ${SRCFILES})
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 17)
 
+# Add MediaPipe
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/mediapipe/include/)
+add_library(Example SHARED IMPORTED)
+set_property(TARGET Example PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/mediapipe/lib/libexample.so)
+
 target_link_libraries(${PROJECT_NAME} igl::core igl::opengl_glfw igl::opengl_glfw_imgui Open3D::Open3D)
+target_link_libraries(${PROJECT_NAME} Example)
