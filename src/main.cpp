@@ -17,11 +17,11 @@
 #include <map>
 //#include "mediapipe/include/example.h"
 
-//#include "mediapipe/framework/port/logging.h"
-
 #include "utils.h"
 #include "loading.h"
 #include "processing.h"
+
+#include "registrator.h"
 
 using namespace std;
 using namespace Eigen;
@@ -69,6 +69,9 @@ int nb_frames;
 bool is_first_frame = true;
 float min_dist_to_joints = 0.007;
 
+//Registrator
+Registrator registrator;
+
 //Temp data
 vector<Eigen::Vector3d> prev_points_vec;
 vector<Eigen::Matrix4d> transformations;
@@ -106,6 +109,7 @@ bool point_too_close_to_hands(
   const Eigen::MatrixXd& joints_left,
   const Eigen::MatrixXd& joints_right,
   const Eigen::RowVector3f& point) {
+    
     ///////////////
     return false;
     ///////////////
@@ -246,14 +250,12 @@ bool callback_pre_draw(Viewer& viewer) {
       cam2rig,
       list_joints_left[human_timestamp_idx],
       list_joints_right[human_timestamp_idx],
-      lut,
-      focals[l],
+      lut, focals[l],
       intrinsics_ox, intrinsics_oy,
       intrinsics_width, intrinsics_height,
-      JointsLeft,
-      JointsRight,
-      Points,
-      Colors);
+      JointsLeft, JointsRight,
+      Points, Colors
+    );
 
     viewer.data().clear();
     viewer.data().add_points(Points, Colors);
@@ -274,11 +276,19 @@ bool callback_pre_draw(Viewer& viewer) {
         viewer.core().align_camera_center(Points);
         is_first_frame = false;
       } else {
-        //TODO For now the processing is done offline but should be moved here at some point
-
-        /*Eigen::Matrix<double, 6, 6> InfoMat;
-        Eigen::Matrix4d T = get_transformation(points_vec, prev_points_vec, InfoMat);
-        transformations.push_back(T);*/
+        bool success = registrator.mergePCD(points_vec);
+        cout << "Success " << success << endl;
+        Eigen::RowVector3d reconstructed_color = success ? Eigen::RowVector3d(0.75, 0.75, 1) : Eigen::RowVector3d(0.25, 0.25, 0.5);
+        auto reconstructed_pcd = registrator.getReconstructedPCD();
+        Eigen::MatrixXd reconstructed_pcd_eigen = vec_to_eigen(*reconstructed_pcd);
+        //Add reconstructed point cloud on top
+        viewer.data().add_points(reconstructed_pcd_eigen, reconstructed_color);
+        ++l;
+        cout << "Frame " << l << endl;
+        if(l == nb_frames) {
+          registrator.saveReconstructedMesh("../out/FinalMesh.ply");
+        }
+        return false;
       }
       prev_points_vec = points_vec;
     }
@@ -579,6 +589,17 @@ int main(int argc, char *argv[]) {
   }
   string sub_folder = argv[1];
   folder = "../data/" + sub_folder + "/"; //Set data path here
+
+  const std::string s = "Hello!";
+  //auto res = mediapipe::Example::Create(s);
+  //auto res = mediapipe::Ex
+
+  // if(res == nullptr) {
+  //   cout << "failed initialization" << endl;
+  // } else {
+  //   uint8_t* data;
+  //   std::cout << res->Process(data, 10, 5) << endl;
+  // }
 
   initialize();
 
