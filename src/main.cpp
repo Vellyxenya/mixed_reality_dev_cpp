@@ -287,6 +287,10 @@ bool callback_pre_draw(Viewer& viewer) {
         cout << "Frame " << l << endl;
         if(l == nb_frames) {
           registrator.saveReconstructedMesh("../out/FinalMesh.ply");
+          viewer.data().clear();
+          viewer.data().point_size = 3;
+          reconstructed_pcd = registrator.getReconstructedPCD();
+          viewer.data().add_points(reconstructed_pcd_eigen, Eigen::RowVector3d(0.5, 1, 0.75));
         }
         return false;
       }
@@ -536,7 +540,7 @@ void read_data() {
   }
   cout << endl;
 
-  size_t max_frames = 500;
+  size_t max_frames = 200;
   nb_frames = min(max_frames, depth_images.size());
 
   viewer.data().clear();

@@ -50,6 +50,8 @@ private:
     float m_max_rmse = 0.004;
     float m_min_fitness = 0.97;
 
+    void denoise(const std::shared_ptr<open3d::geometry::PointCloud>& pcd) const;
+
     /**
      * @brief Construct a new is Registration Successful object
      * 
