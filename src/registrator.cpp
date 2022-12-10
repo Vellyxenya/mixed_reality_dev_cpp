@@ -8,6 +8,7 @@
 #include <chrono>
 #include <string>
 #include <fstream>
+#include <queue>
 
 using namespace open3d;
 using std::cout;
@@ -154,15 +155,140 @@ void Registrator::denoise(const std::shared_ptr<open3d::geometry::PointCloud>& p
         //Read back the denoised point cloud
         cout << "C++ takes over. Reading the denoised point cloud..." << endl;
         pcd->points_.clear();
-        std::ifstream istream("../denoised/" + denoised_file_name, std::ifstream::in);
+        //std::ifstream istream("../denoised/" + denoised_file_name, std::ifstream::in);
+        std::ifstream istream("../finaldenoisedboxdb.xyz", std::ifstream::in);
         for(std::string line; std::getline(istream, line); ) { //read stream line by line
             std::istringstream in(line); //make a stream for the line itself
             float x, y, z;
             in >> x >> y >> z;
             pcd->points_.push_back(Eigen::Vector3d(x, y, z));
         }
+        cout << "Finished reading back the denoised pcd" << endl;
+
     } catch (const char* msg) {
         std::cerr << msg << endl;
+    }
+}
+
+void Registrator::flood(const std::shared_ptr<open3d::geometry::PointCloud>& pcd) const {
+    using std::vector;
+    Eigen::Vector3d min = pcd->GetMinBound();
+    Eigen::Vector3d max = pcd->GetMaxBound();
+    Eigen::Vector3d extents = max - min;
+    Eigen::Vector3d extents_inv = Eigen::Vector3d(1/extents.x(), 1/extents.y(), 1/extents.z());
+    size_t n = pcd->points_.size();
+    Eigen::Vector3d resolution = Eigen::Vector3d(70, 70, 70);
+    Eigen::Vector3d resolution_inv = Eigen::Vector3d(1/resolution.x(), 1/resolution.y(), 1/resolution.z());
+    vector<vector<vector<uint8_t>>>* occupancy = new vector<vector<vector<uint8_t>>>(resolution.x(), 
+        vector<vector<uint8_t>>(resolution.y(), vector<uint8_t>(resolution.z(), 0)));
+    for(int i = 0; i < n; i++) {
+        Eigen::Vector3d point = (pcd->points_[i] - min).cwiseProduct(extents_inv).cwiseProduct(resolution);
+        int x_ = (int)point.x();
+        int y_ = (int)point.y();
+        int z_ = (int)point.z();
+        for(int i = -1; i <= 1; i++) {
+            for(int j = -1; j <= 1; j++) {
+                for(int k = -1; k <= 1; k++) {
+                    int x = x_ + i;
+                    int y = y_ + j;
+                    int z = z_ + k;
+                    if(x >= 0 && x < resolution.x() && y >= 0 && y < resolution.y() && z >= 0 && z < resolution.z()) {
+                        (*occupancy)[x][y][z] = 1;
+                    }
+                }
+            }
+        }
+    }
+    Eigen::Vector3d center = (pcd->GetCenter() - min).cwiseProduct(extents_inv).cwiseProduct(resolution);
+    std::queue<Eigen::Vector3i> q;
+    q.push(Eigen::Vector3i((int)center.x(), (int)center.y(), (int)center.z()));
+    vector<Eigen::Vector3d> inner_points;
+    while(!q.empty()) {
+        //cout << q.size() << " ";
+        Eigen::Vector3i p = q.front();
+        q.pop();
+        if((*occupancy)[p.x()][p.y()][p.z()] != 0)
+            continue;
+        //cout << "..." << (*boundary)[p.x()][p.y()][p.z()] << endl;
+        (*occupancy)[p.x()][p.y()][p.z()] = 2;
+        Eigen::Vector3d w_p = Eigen::Vector3d(p.x(), p.y(), p.z()).cwiseProduct(resolution_inv).cwiseProduct(extents) + min;
+        inner_points.push_back(w_p);
+        for(int i = -1; i <= 1; i++) {
+            for(int j = -1; j <= 1; j++) {
+                for(int k = -1; k <= 1; k++) {
+                    int x = p.x() + i;
+                    int y = p.y() + j;
+                    int z = p.z() + k;
+                    if(x >= 0 && x < resolution.x() && y >= 0 && y < resolution.y() && z >= 0 && z < resolution.z()) {
+                        if(!(i == 0 && j == 0 && k == 0)) {
+                            short val = (*occupancy)[x][y][z];
+                            if(val == 0) {
+                                q.push(Eigen::Vector3i(x, y, z));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    cout << "====SIZE: " << inner_points.size() << endl;
+
+    vector<Eigen::Vector3i> expanded_points;
+    for(int x = 0; x < resolution.x(); x++) {
+        for(int y = 0; y < resolution.y(); y++) {
+            for(int z = 0; z < resolution.z(); z++) {
+                bool found_neighbor = false;
+                if((*occupancy)[x][y][z] == 2)
+                    continue;
+                for(int i = -1; i <= 1 && !found_neighbor; i++) {
+                    for(int j = -1; j <= 1 && !found_neighbor; j++) {
+                        for(int k = -1; k <= 1 && !found_neighbor; k++) {
+                            int x_ = x + i;
+                            int y_ = y + j;
+                            int z_ = z + k;
+                            if(x_ >= 0 && x_ < resolution.x() && y_ >= 0 && y_ < resolution.y() && z_ >= 0 && z_ < resolution.z()) {
+                                if((*occupancy)[x_][y_][z_] == 2) {
+                                    expanded_points.push_back(Eigen::Vector3i(x, y, z));
+                                    found_neighbor = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for(auto p : expanded_points) {
+        (*occupancy)[p.x()][p.y()][p.z()] = 2;
+    }
+
+    pcd->points_.clear();
+    for(int x = 0; x < resolution.x(); x++) {
+        for(int y = 0; y < resolution.y(); y++) {
+            for(int z = 0; z < resolution.z(); z++) {
+                bool found_neighbor = false;
+                if((*occupancy)[x][y][z] == 2)
+                    continue;
+                for(int i = -1; i <= 1 && !found_neighbor; i++) {
+                    for(int j = -1; j <= 1 && !found_neighbor; j++) {
+                        for(int k = -1; k <= 1 && !found_neighbor; k++) {
+                            int x_ = x + i;
+                            int y_ = y + j;
+                            int z_ = z + k;
+                            if(x_ >= 0 && x_ < resolution.x() && y_ >= 0 && y_ < resolution.y() && z_ >= 0 && z_ < resolution.z()) {
+                                if((*occupancy)[x_][y_][z_] == 2) {
+                                    found_neighbor = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                if(found_neighbor) {
+                    Eigen::Vector3d w_p = Eigen::Vector3d(x, y, z).cwiseProduct(resolution_inv).cwiseProduct(extents) + min;
+                    pcd->points_.push_back(w_p);
+                }
+            }
+        }
     }
 }
 
@@ -172,8 +298,26 @@ void Registrator::saveReconstructedMesh(const std::string& save_path) const {
 
     denoise(m_pcd);
 
+    flood(m_pcd);
+
     m_pcd->EstimateNormals();
-    float scale = 3;
-    std::tie(mesh, densities) = geometry::TriangleMesh::CreateFromPointCloudPoisson(*m_pcd, 8UL, 0, scale);
+
+    float scale = 1;
+    std::tie(mesh, densities) = geometry::TriangleMesh::CreateFromPointCloudPoisson(*m_pcd, 9, 0, scale);
+    std::vector<bool> mask;
+    mask.reserve(densities.size());
+    for(int i = 0; i < densities.size(); i++) {
+        //cout << densities[i] << " ";
+        mask.push_back(densities[i] <= 2); //4.5);
+    }
+    //cout << endl;
+    mesh->RemoveVerticesByMask(mask);
+
+    // std::vector<double> radii = {0.01, 0.005, 0.0025, 0.001};
+    // mesh = geometry::TriangleMesh::CreateFromPointCloudBallPivoting(*m_pcd, radii);
+
+    // double alpha = 0.02;
+    // mesh = geometry::TriangleMesh::CreateFromPointCloudAlphaShape(*m_pcd, alpha);
+    
     io::WriteTriangleMesh(save_path, *mesh);
 }

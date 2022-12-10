@@ -264,7 +264,7 @@ bool callback_pre_draw(Viewer& viewer) {
     viewer.data().set_edges(JointsRight, E, Eigen::RowVector3d(1, 0, 0));
 
     int minimum_points = 1000; //TODO probably increase this
-    int nb_warmup_frames = 50;
+    int nb_warmup_frames = 30;
     if(Points.rows() > minimum_points && l >= nb_warmup_frames) { //valid frame
       // cout << "min: " << Points.colwise().minCoeff() << endl;
       // cout << "max: " << Points.colwise().maxCoeff() << endl;
@@ -290,7 +290,9 @@ bool callback_pre_draw(Viewer& viewer) {
           viewer.data().clear();
           viewer.data().point_size = 3;
           reconstructed_pcd = registrator.getReconstructedPCD();
-          viewer.data().add_points(reconstructed_pcd_eigen, Eigen::RowVector3d(0.5, 1, 0.75));
+          Eigen::MatrixXd ppoints = vec_to_eigen(*reconstructed_pcd);
+          viewer.data().add_points(ppoints, Eigen::RowVector3d(0.5, 1, 0.75));
+          viewer.core().align_camera_center(ppoints);
         }
         return false;
       }
@@ -540,7 +542,7 @@ void read_data() {
   }
   cout << endl;
 
-  size_t max_frames = 200;
+  size_t max_frames = 50;
   nb_frames = min(max_frames, depth_images.size());
 
   viewer.data().clear();
@@ -594,15 +596,19 @@ int main(int argc, char *argv[]) {
   string sub_folder = argv[1];
   folder = "../data/" + sub_folder + "/"; //Set data path here
 
-  const std::string s = "Hello!";
-  //auto res = mediapipe::Example::Create(s);
-  //auto res = mediapipe::Ex
+  //std::ifstream istream("../data/Denoise/Box2/AfterDBScan.xyz", std::ifstream::in);
+  // std::ifstream istream("../finaldenoisedbox2db.xyz", std::ifstream::in);
+  // std::vector<Eigen::Vector3d> vec;
+  // for(std::string line; std::getline(istream, line); ) { //read stream line by line
+  //     std::istringstream in(line); //make a stream for the line itself
+  //     float x, y, z;
+  //     in >> x >> y >> z;
+  //     vec.push_back(Eigen::Vector3d(x, y, z));
+  // }
 
-  // if(res == nullptr) {
-  //   cout << "failed initialization" << endl;
-  // } else {
-  //   uint8_t* data;
-  //   std::cout << res->Process(data, 10, 5) << endl;
+  // Eigen::MatrixXd Points(vec.size(), 3);
+  // for(int i = 0; i < vec.size(); i++) {
+  //   Points.row(i) = vec[i].transpose();
   // }
 
   initialize();
@@ -628,6 +634,10 @@ int main(int argc, char *argv[]) {
       ImGui::InputDouble("Feature voxel size", &feature_voxel_size);
     }
   };
+
+  // viewer.data().clear();
+  // viewer.data().add_points(Points, Eigen::RowVector3d(0.5, 0, 0.5));
+  // viewer.core().align_camera_center(Points);
 
   viewer.callback_key_down = callback_key_down;
   viewer.callback_pre_draw = callback_pre_draw;

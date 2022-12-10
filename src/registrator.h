@@ -52,6 +52,8 @@ private:
 
     void denoise(const std::shared_ptr<open3d::geometry::PointCloud>& pcd) const;
 
+    void flood(const std::shared_ptr<open3d::geometry::PointCloud>& pcd) const;
+
     /**
      * @brief Construct a new is Registration Successful object
      * 
