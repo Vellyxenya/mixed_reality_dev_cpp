@@ -22,6 +22,7 @@
 #include "processing.h"
 
 #include "registrator.h"
+#include "MeshProcessor.h"
 
 using namespace std;
 using namespace Eigen;
@@ -71,6 +72,7 @@ float min_dist_to_joints = 0.007;
 
 //Registrator
 Registrator registrator;
+MeshProcessor meshProcessor;
 
 //Temp data
 vector<Eigen::Vector3d> prev_points_vec;
@@ -286,13 +288,31 @@ bool callback_pre_draw(Viewer& viewer) {
         ++l;
         cout << "Frame " << l << endl;
         if(l == nb_frames) {
-          registrator.saveReconstructedMesh("../out/FinalMesh.ply");
+          Eigen::MatrixXd V, smoothV;
+          Eigen::MatrixXi F;
+          Eigen::MatrixXd N;
+          registrator.saveReconstructedMesh("../out/FinalMesh.ply", V, F);
+
+          meshProcessor.smoothMesh(V, F, smoothV);
+
+          meshProcessor.saveMesh("../out/rough_mesh.ply", V, F);
+          meshProcessor.saveMesh("../out/smooth_mesh.ply", smoothV, F);
+
+          igl::per_face_normals(smoothV, F, N);
+
           viewer.data().clear();
-          viewer.data().point_size = 3;
-          reconstructed_pcd = registrator.getReconstructedPCD();
-          Eigen::MatrixXd ppoints = vec_to_eigen(*reconstructed_pcd);
-          viewer.data().add_points(ppoints, Eigen::RowVector3d(0.5, 1, 0.75));
-          viewer.core().align_camera_center(ppoints);
+
+          viewer.data().set_mesh(smoothV, F);
+          viewer.data().show_lines = true;
+          viewer.data().show_faces = true;
+          viewer.data().set_normals(-N);
+          viewer.core().align_camera_center(smoothV);
+
+          // viewer.data().point_size = 3;
+          // reconstructed_pcd = registrator.getReconstructedPCD();
+          // Eigen::MatrixXd ppoints = vec_to_eigen(*reconstructed_pcd);
+          // viewer.data().add_points(ppoints, Eigen::RowVector3d(0.5, 1, 0.75));
+          // viewer.core().align_camera_center(ppoints);
         }
         return false;
       }

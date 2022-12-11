@@ -41,7 +41,7 @@ public:
      * @brief Construct a mesh from the point cloud and save it to disk
      * @param save_path path to which the mesh should be saved
      */
-    void saveReconstructedMesh(const std::string& save_path) const;
+    void saveReconstructedMesh(const std::string& save_path, Eigen::MatrixXd& V, Eigen::MatrixXi& F) const;
 
 private:
     std::shared_ptr<open3d::geometry::PointCloud> m_pcd;
@@ -52,7 +52,8 @@ private:
 
     void denoise(const std::shared_ptr<open3d::geometry::PointCloud>& pcd) const;
 
-    void flood(const std::shared_ptr<open3d::geometry::PointCloud>& pcd) const;
+    void flood(const std::shared_ptr<open3d::geometry::PointCloud>& pcd, 
+        const Eigen::Vector3d& resolution, Eigen::MatrixXd& grid_points, Eigen::VectorXd& grid_values) const;
 
     /**
      * @brief Construct a new is Registration Successful object
